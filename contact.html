@@ -68,56 +68,35 @@
                         margin-bottom: 30px;
                     }
 
-                    form {
+                    .contact-card {
                         background: var(--card-bg);
                         border: 1px solid var(--border);
                         border-radius: 6px;
-                        padding: 30px;
-                        max-width: 550px;
+                        padding: 24px;
+                        margin-top: 20px;
                     }
 
-                    .form-group {
-                        margin-bottom: 20px;
-                    }
-
-                    label {
-                        display: block;
+                    .contact-method {
                         font-family: monospace;
-                        font-size: 0.9rem;
-                        margin-bottom: 8px;
+                        margin-bottom: 15px;
+                        font-size: 1.05rem;
+                    }
+
+                    .contact-method:last-child {
+                        margin-bottom: 0;
+                    }
+
+                    .contact-method span {
                         color: var(--text-muted);
                     }
 
-                    input[type="email"], textarea {
-                        width: 100%;
-                        padding: 10px;
-                        background-color: var(--bg-color);
-                        border: 1px solid var(--border);
-                        border-radius: 6px;
-                        color: var(--text-main);
-                        font-size: 1rem;
-                        box-sizing: border-box;
-                    }
-
-                    input[type="email"]:focus, textarea:focus {
-                        outline: none;
-                        border-color: var(--accent);
-                    }
-
-                    button[type="submit"] {
-                        background-color: #21262d;
-                        border: 1px solid var(--border);
+                    .contact-method a {
                         color: var(--accent);
-                        padding: 10px 20px;
-                        font-family: monospace;
-                        font-size: 1rem;
-                        border-radius: 6px;
-                        cursor: pointer;
-                        transition: background 0.2s;
+                        text-decoration: none;
                     }
 
-                    button[type="submit"]:hover {
-                        background-color: var(--border);
+                    .contact-method a:hover {
+                        text-decoration: underline;
                     }
 
                     footer {
@@ -139,7 +118,7 @@
                 <div class="meta-links">
                     <a href="index.html">← Back to Home</a>
                     <a href="https://github.com" target="_blank">GitHub</a>
-                    <a href="https://www.linkedin.com/in/kmadiar/" target="_blank">LinkedIn</a>
+                    <a href="https://linkedin.com" target="_blank">LinkedIn</a>
                 </div>
             </header>
 
@@ -147,19 +126,19 @@
                 <section id="contact-section">
                     <div class="section-title">03 // Establish Connection</div>
 
-                    <p>For engineering inquiries, security disclosures, or project collaborations, reach out via the secure endpoint below, ping my professional network profile at <a href="https://www.linkedin.com/in/kmadiar/" target="_blank" style="color: var(--accent); text-decoration: none;">linkedin/in/kmadiar</a>, or drop a line directly at <a href="mailto:hello@kmadiar.dev" style="color: var(--accent); text-decoration: none;">hello@kmadiar.dev</a>.</p>
+                    <p>For engineering inquiries, architectural consultations, or project collaborations, ping any active communication node below:</p>
 
-                    <form action="https://formspree.io" method="GET">
-                        <div class="form-group">
-                            <label for="email">_sender_identity (Your Email):</label>
-                            <input type="email" id="email" name="_replyto" required placeholder="name@domain.com">
+                    <div class="contact-card">
+                        <div class="contact-method">
+                            <span>[email]    -> </span><a href="mailto:hello@kmadiar.dev">hello@kmadiar.dev</a>
                         </div>
-                        <div class="form-group">
-                            <label for="message">_payload (Message Content):</label>
-                            <textarea id="message" name="message" rows="6" required placeholder="Type your data transmission here..."></textarea>
+                        <div class="contact-method">
+                            <span>[linkedin] -> </span><a href="https://www.linkedin.com/in/kmadiar/" target="_blank">://linkedin.com/in/kmadiar/</a>
                         </div>
-                        <button type="submit">Execute Submit();</button>
-                    </form>
+                        <div class="contact-method">
+                            <span>[github]   -> </span><a href="http://github.com/kmadiar" target="_blank">://github.com/kmadiar</a>
+                        </div>
+                    </div>
                 </section>
             </main>
 
