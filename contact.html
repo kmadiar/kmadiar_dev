@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>Contact | kmadiar.dev</title>
+                <style>
+                    :root {
+                        --bg-color: #0d1117;
+                        --text-main: #c9d1d9;
+                        --text-muted: #8b949e;
+                        --accent: #58a6ff;
+                        --card-bg: #161b22;
+                        --border: #30363d;
+                    }
+
+                    body {
+                        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+                        background-color: var(--bg-color);
+                        color: var(--text-main);
+                        line-height: 1.6;
+                        margin: 0;
+                        padding: 0;
+                    }
+
+                    .container {
+                        max-width: 760px;
+                        margin: 0 auto;
+                        padding: 40px 20px;
+                    }
+
+                    header {
+                        border-bottom: 1px solid var(--border);
+                        padding-bottom: 20px;
+                        margin-bottom: 40px;
+                    }
+
+                    .logo {
+                        font-family: monospace;
+                        font-size: 1.5rem;
+                        font-weight: bold;
+                        color: var(--accent);
+                        text-decoration: none;
+                    }
+
+                    .meta-links {
+                        display: flex;
+                        gap: 15px;
+                        font-family: monospace;
+                        margin-top: 10px;
+                    }
+
+                    .meta-links a {
+                        color: var(--accent);
+                        text-decoration: none;
+                    }
+
+                    .meta-links a:hover {
+                        text-decoration: underline;
+                    }
+
+                    .section-title {
+                        font-family: monospace;
+                        font-size: 1.2rem;
+                        color: var(--text-muted);
+                        border-bottom: 1px solid var(--border);
+                        padding-bottom: 5px;
+                        margin-bottom: 30px;
+                    }
+
+                    form {
+                        background: var(--card-bg);
+                        border: 1px solid var(--border);
+                        border-radius: 6px;
+                        padding: 30px;
+                        max-width: 550px;
+                    }
+
+                    .form-group {
+                        margin-bottom: 20px;
+                    }
+
+                    label {
+                        display: block;
+                        font-family: monospace;
+                        font-size: 0.9rem;
+                        margin-bottom: 8px;
+                        color: var(--text-muted);
+                    }
+
+                    input[type="email"], textarea {
+                        width: 100%;
+                        padding: 10px;
+                        background-color: var(--bg-color);
+                        border: 1px solid var(--border);
+                        border-radius: 6px;
+                        color: var(--text-main);
+                        font-size: 1rem;
+                        box-sizing: border-box;
+                    }
+
+                    input[type="email"]:focus, textarea:focus {
+                        outline: none;
+                        border-color: var(--accent);
+                    }
+
+                    button[type="submit"] {
+                        background-color: #21262d;
+                        border: 1px solid var(--border);
+                        color: var(--accent);
+                        padding: 10px 20px;
+                        font-family: monospace;
+                        font-size: 1rem;
+                        border-radius: 6px;
+                        cursor: pointer;
+                        transition: background 0.2s;
+                    }
+
+                    button[type="submit"]:hover {
+                        background-color: var(--border);
+                    }
+
+                    footer {
+                        margin-top: 60px;
+                        border-top: 1px solid var(--border);
+                        padding-top: 20px;
+                        font-family: monospace;
+                        font-size: 0.85rem;
+                        text-align: center;
+                        color: var(--text-muted);
+                    }
+                </style>
+    </head>
+    <body>
+
+        <div class="container">
+            <header>
+                <a href="index.html" class="logo">kmadiar_@_dev:~# cd ..</a>
+                <div class="meta-links">
+                    <a href="index.html">← Back to Home</a>
+                    <a href="https://github.com" target="_blank">GitHub</a>
+                    <a href="https://www.linkedin.com/in/kmadiar/" target="_blank">LinkedIn</a>
+                </div>
+            </header>
+
+            <main>
+                <section id="contact-section">
+                    <div class="section-title">03 // Establish Connection</div>
+
+                    <p>For engineering inquiries, security disclosures, or project collaborations, reach out via the secure endpoint below, ping my professional network profile at <a href="https://www.linkedin.com/in/kmadiar/" target="_blank" style="color: var(--accent); text-decoration: none;">linkedin/in/kmadiar</a>, or drop a line directly at <a href="mailto:admin@kmadiar.dev" style="color: var(--accent); text-decoration: none;">admin@kmadiar.dev</a>.</p>
+
+                    <form action="https://formspree.io" method="POST">
+                        <div class="form-group">
+                            <label for="email">_sender_identity (Your Email):</label>
+                            <input type="email" id="email" name="_replyto" required placeholder="name@domain.com">
+                        </div>
+                        <div class="form-group">
+                            <label for="message">_payload (Message Content):</label>
+                            <textarea id="message" name="message" rows="6" required placeholder="Type your data transmission here..."></textarea>
+                        </div>
+                        <button type="submit">Execute Submit();</button>
+                    </form>
+                </section>
+            </main>
+
+            <footer>
+                <p>© 2026 kmadiar.dev. Built with pure HTML/CSS via GH-Pages.</p>
+            </footer>
+        </div>
+
+    </body>
+</html>
