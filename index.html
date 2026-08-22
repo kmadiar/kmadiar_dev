@@ -1,197 +1,81 @@
 <!DOCTYPE html>
 <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                <title>kmadiar.dev | Technical Blog & Systems Engineering</title>
-                <style>
-                    :root {
-                        --bg-color: #0d1117;
-                        --text-main: #c9d1d9;
-                        --text-muted: #8b949e;
-                        --accent: #58a6ff;
-                        --card-bg: #161b22;
-                        --border: #30363d;
-                    }
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>kmadiar.dev | On-device &amp; edge machine learning</title>
+    <meta name="description" content="Notes on on-device and edge machine learning: Apple Silicon, MLX, Metal, quantization, and edge inference runtimes.">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
 
-                    body {
-                        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-                        background-color: var(--bg-color);
-                        color: var(--text-main);
-                        line-height: 1.6;
-                        margin: 0;
-                        padding: 0;
-                    }
+    <div class="container">
+        <header>
+            <a href="index.html" class="logo">kmadiar_@_dev:~#</a>
+            <p class="bio">On-device and edge machine learning. Apple Silicon, MLX and Metal, quantization, and the inference runtimes that actually ship.</p>
+            <div class="meta-links">
+                <a href="https://github.com/kmadiar" target="_blank" rel="noopener">GitHub</a>
+                <a href="https://www.linkedin.com/in/kmadiar/" target="_blank" rel="noopener">LinkedIn</a>
+                <a href="contact.html">Contact</a>
+            </div>
+        </header>
 
-                    .container {
-                        max-width: 760px;
-                        margin: 0 auto;
-                        padding: 40px 20px;
-                    }
+        <main>
+            <section id="posts">
+                <div class="section-title">01 // Recent Publications</div>
 
-                    header {
-                        border-bottom: 1px solid var(--border);
-                        padding-bottom: 20px;
-                        margin-bottom: 40px;
-                    }
-
-                    .logo {
-                        font-family: monospace;
-                        font-size: 1.5rem;
-                        font-weight: bold;
-                        color: var(--accent);
-                        text-decoration: none;
-                    }
-
-                    h1, h2, h3 {
-                        color: #f0f6fc;
-                    }
-
-                    .bio {
-                        font-size: 1.1rem;
-                        margin-bottom: 20px;
-                    }
-
-                    .meta-links {
-                        display: flex;
-                        gap: 15px;
-                        font-family: monospace;
-                    }
-
-                    .meta-links a {
-                        color: var(--accent);
-                        text-decoration: none;
-                    }
-
-                    .meta-links a:hover {
-                        text-decoration: underline;
-                    }
-
-                    section {
-                        margin-bottom: 40px;
-                    }
-
-                    .section-title {
-                        font-family: monospace;
-                        font-size: 1.2rem;
-                        color: var(--text-muted);
-                        border-bottom: 1px solid var(--border);
-                        padding-bottom: 5px;
-                        margin-bottom: 20px;
-                    }
-
-                    .post-card, .project-card {
-                        background: var(--card-bg);
-                        border: 1px solid var(--border);
-                        border-radius: 6px;
-                        padding: 20px;
-                        margin-bottom: 15px;
-                        transition: border-color 0.2s;
-                    }
-
-                    .post-card:hover, .project-card:hover {
-                        border-color: var(--accent);
-                    }
-
-                    .post-date, .project-tech {
-                        font-family: monospace;
-                        font-size: 0.85rem;
-                        color: var(--text-muted);
-                    }
-
-                    .post-title, .project-title {
-                        font-size: 1.3rem;
-                        margin: 5px 0 10px 0;
-                    }
-
-                    .post-title a {
-                        color: var(--accent);
-                        text-decoration: none;
-                    }
-
-                    .post-title a:hover {
-                        text-decoration: underline;
-                    }
-
-                    .tags {
-                        display: flex;
-                        gap: 8px;
-                        margin-top: 10px;
-                    }
-
-                    .tag {
-                        background: #21262d;
-                        border: 1px solid var(--border);
-                        padding: 2px 8px;
-                        border-radius: 12px;
-                        font-size: 0.8rem;
-                        font-family: monospace;
-                    }
-
-                    footer {
-                        margin-top: 60px;
-                        border-top: 1px solid var(--border);
-                        padding-top: 20px;
-                        font-family: monospace;
-                        font-size: 0.85rem;
-                        text-align: center;
-                        color: var(--text-muted);
-                    }
-                </style>
-    </head>
-    <body>
-
-        <div class="container">
-            <header>
-                <a href="index.html" class="logo">kmadiar_@_dev:~#</a>
-                <p class="bio">Tech stack exploration, engineering practices, and notes on complex system architecture.</p>
-                <div class="meta-links">
-                    <a href="https://github.com" target="_blank">GitHub</a>
-                    <a href="contact.html">Contact</a>
+                <!-- POSTS:START — newest first. Add each new post card directly below this line. -->
+                <div class="post-card">
+                    <div class="post-date">August 22, 2026</div>
+                    <h3 class="post-title"><a href="posts/2026-08-22-speculative-decoding-apple-silicon-moe.html">Speculative decoding is not a free 2x on Apple Silicon, and MoE makes it worse</a></h3>
+                    <p>Liquid AI shipped an on-device result with 85% draft acceptance and a 1.04x speedup. Why sparse experts and unified memory break the assumption that acceptance rate predicts throughput.</p>
+                    <div class="tags">
+                        <span class="tag">#on-device</span>
+                        <span class="tag">#apple-silicon</span>
+                        <span class="tag">#metal</span>
+                        <span class="tag">#llama-cpp</span>
+                    </div>
                 </div>
-            </header>
-
-            <main>
-                <section id="posts">
-                    <div class="section-title">01 // Recent Publications</div>
-
-                    <div class="post-card">
-                        <div class="post-date">July 24, 2026</div>
-                        <h3 class="post-title"><a href="#">Migrating Infrastructure to GitHub Pages and Configuring Apex Domains</a></h3>
-                        <p>Deep dive into routing mechanics, configuring A records, and managing ALIAS/ANAME records for .dev TLDs with strict TLS requirements.</p>
-                        <div class="tags">
-                            <span class="tag">#dns</span>
-                            <span class="tag">#devops</span>
-                            <span class="tag">#github</span>
-                        </div>
+                <div class="post-card">
+                    <div class="post-date">August 16, 2026</div>
+                    <h3 class="post-title"><a href="posts/2026-08-16-executorch-apple-silicon-mlx-metal.html">ExecuTorch's Apple Silicon path is MLX and hand-written Metal. Not Core ML, not MPS.</a></h3>
+                    <p>Meta's flagship on-device model demo routes around both delegates Apple ships in the OS. What that means if you're choosing a backend today, plus the K-quant repacking trick worth stealing.</p>
+                    <div class="tags">
+                        <span class="tag">#on-device</span>
+                        <span class="tag">#apple-silicon</span>
+                        <span class="tag">#executorch</span>
+                        <span class="tag">#mlx</span>
                     </div>
+                </div>
 
-                    <div class="post-card">
-                        <div class="post-date">June 12, 2026</div>
-                        <h3 class="post-title"><a href="#">Optimizing Static Page Performance: Legacy Monoliths to JAMstack</a></h3>
-                        <p>Why bundle size minimization and transition to pure semantic HTML remains the cleanest architectural solution for content delivery.</p>
-                        <div class="tags">
-                            <span class="tag">#architecture</span>
-                            <span class="tag">#frontend</span>
-                            <span class="tag">#web-perf</span>
-                        </div>
+                <div class="post-card">
+                    <div class="post-date">August 13, 2026</div>
+                    <h3 class="post-title"><a href="posts/2026-08-13-onnx-runtime-webgpu-webnn.html">ONNX Runtime just deprecated WebGL and JSEP. Read the changelog, not the WebNN press release.</a></h3>
+                    <p>Two browser-ML milestones landed a day apart and point in opposite directions. Thirty WebGPU changes against one WebNN line &mdash; including PagedAttention in a browser.</p>
+                    <div class="tags">
+                        <span class="tag">#on-device</span>
+                        <span class="tag">#webgpu</span>
+                        <span class="tag">#webnn</span>
+                        <span class="tag">#npu</span>
                     </div>
-                </section>
+                </div>
+                <!-- POSTS:END -->
+            </section>
 
-                <section id="projects">
-                    <div class="section-title">02 // Projects & Open Source</div>
-                    <div class="project-card">
-                        <h3 class="project-title">Production Blueprint</h3>
-                        <p>CI/CD pipeline configuration templates engineered for rapid deployment of isolated environments.</p>
-                        <div class="project-tech">Stack: GitHub Actions, Docker, Shell</div>
-                    </div>
-                </section>
-            </main>
+            <section id="projects">
+                <div class="section-title">02 // Projects &amp; Open Source</div>
+                <div class="project-card">
+                    <h3 class="project-title">Production Blueprint</h3>
+                    <p>CI/CD pipeline configuration templates engineered for rapid deployment of isolated environments.</p>
+                    <div class="project-tech">Stack: GitHub Actions, Docker, Shell</div>
+                </div>
+            </section>
+        </main>
 
-            <footer>
-                <p>© 2026 kmadiar.dev</p>
-            </footer>
-        </div>
+        <footer>
+            <p>&copy; 2026 kmadiar.dev</p>
+        </footer>
+    </div>
 
-    </body>
+</body>
 </html>

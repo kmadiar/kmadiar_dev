@@ -1,151 +1,47 @@
 <!DOCTYPE html>
 <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                <title>Contact | kmadiar.dev</title>
-                <style>
-                    :root {
-                        --bg-color: #0d1117;
-                        --text-main: #c9d1d9;
-                        --text-muted: #8b949e;
-                        --accent: #58a6ff;
-                        --card-bg: #161b22;
-                        --border: #30363d;
-                    }
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Contact | kmadiar.dev</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
 
-                    body {
-                        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-                        background-color: var(--bg-color);
-                        color: var(--text-main);
-                        line-height: 1.6;
-                        margin: 0;
-                        padding: 0;
-                    }
+    <div class="container">
+        <header>
+            <a href="index.html" class="logo">kmadiar_@_dev:~# cd ..</a>
+            <div class="meta-links" style="margin-top: 10px;">
+                <a href="index.html">&larr; Back to Home</a>
+                <a href="https://github.com/kmadiar" target="_blank" rel="noopener">GitHub</a>
+                <a href="https://www.linkedin.com/in/kmadiar/" target="_blank" rel="noopener">LinkedIn</a>
+            </div>
+        </header>
 
-                    .container {
-                        max-width: 760px;
-                        margin: 0 auto;
-                        padding: 40px 20px;
-                    }
+        <main>
+            <section id="contact-section">
+                <div class="section-title">03 // Establish Connection</div>
 
-                    header {
-                        border-bottom: 1px solid var(--border);
-                        padding-bottom: 20px;
-                        margin-bottom: 40px;
-                    }
+                <p>For engineering inquiries, architectural consultations, or project collaborations, ping any active communication node below:</p>
 
-                    .logo {
-                        font-family: monospace;
-                        font-size: 1.5rem;
-                        font-weight: bold;
-                        color: var(--accent);
-                        text-decoration: none;
-                    }
-
-                    .meta-links {
-                        display: flex;
-                        gap: 15px;
-                        font-family: monospace;
-                        margin-top: 10px;
-                    }
-
-                    .meta-links a {
-                        color: var(--accent);
-                        text-decoration: none;
-                    }
-
-                    .meta-links a:hover {
-                        text-decoration: underline;
-                    }
-
-                    .section-title {
-                        font-family: monospace;
-                        font-size: 1.2rem;
-                        color: var(--text-muted);
-                        border-bottom: 1px solid var(--border);
-                        padding-bottom: 5px;
-                        margin-bottom: 30px;
-                    }
-
-                    .contact-card {
-                        background: var(--card-bg);
-                        border: 1px solid var(--border);
-                        border-radius: 6px;
-                        padding: 24px;
-                        margin-top: 20px;
-                    }
-
-                    .contact-method {
-                        font-family: monospace;
-                        margin-bottom: 15px;
-                        font-size: 1.05rem;
-                    }
-
-                    .contact-method:last-child {
-                        margin-bottom: 0;
-                    }
-
-                    .contact-method span {
-                        color: var(--text-muted);
-                    }
-
-                    .contact-method a {
-                        color: var(--accent);
-                        text-decoration: none;
-                    }
-
-                    .contact-method a:hover {
-                        text-decoration: underline;
-                    }
-
-                    footer {
-                        margin-top: 60px;
-                        border-top: 1px solid var(--border);
-                        padding-top: 20px;
-                        font-family: monospace;
-                        font-size: 0.85rem;
-                        text-align: center;
-                        color: var(--text-muted);
-                    }
-                </style>
-    </head>
-    <body>
-
-        <div class="container">
-            <header>
-                <a href="index.html" class="logo">kmadiar_@_dev:~# cd ..</a>
-                <div class="meta-links">
-                    <a href="index.html">← Back to Home</a>
-                    <a href="https://github.com" target="_blank">GitHub</a>
-                    <a href="https://linkedin.com" target="_blank">LinkedIn</a>
-                </div>
-            </header>
-
-            <main>
-                <section id="contact-section">
-                    <div class="section-title">03 // Establish Connection</div>
-
-                    <p>For engineering inquiries, architectural consultations, or project collaborations, ping any active communication node below:</p>
-
-                    <div class="contact-card">
-                        <div class="contact-method">
-                            <span>[email]    -> </span><a href="mailto:hello@kmadiar.dev">hello@kmadiar.dev</a>
-                        </div>
-                        <div class="contact-method">
-                            <span>[linkedin] -> </span><a href="https://www.linkedin.com/in/kmadiar/" target="_blank">://linkedin.com/in/kmadiar/</a>
-                        </div>
-                        <div class="contact-method">
-                            <span>[github]   -> </span><a href="http://github.com/kmadiar" target="_blank">://github.com/kmadiar</a>
-                        </div>
+                <div class="contact-card">
+                    <div class="contact-method">
+                        <span>[email]    -&gt; </span><a href="mailto:hello@kmadiar.dev">hello@kmadiar.dev</a>
                     </div>
-                </section>
-            </main>
+                    <div class="contact-method">
+                        <span>[linkedin] -&gt; </span><a href="https://www.linkedin.com/in/kmadiar/" target="_blank" rel="noopener">://linkedin.com/in/kmadiar/</a>
+                    </div>
+                    <div class="contact-method">
+                        <span>[github]   -&gt; </span><a href="https://github.com/kmadiar" target="_blank" rel="noopener">://github.com/kmadiar</a>
+                    </div>
+                </div>
+            </section>
+        </main>
 
-            <footer>
-                <p>© 2026 kmadiar.dev</p>
-            </footer>
-        </div>
+        <footer>
+            <p>&copy; 2026 kmadiar.dev</p>
+        </footer>
+    </div>
 
-    </body>
+</body>
 </html>

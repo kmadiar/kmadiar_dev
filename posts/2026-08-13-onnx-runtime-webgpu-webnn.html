@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ONNX Runtime just deprecated WebGL and JSEP | kmadiar.dev</title>
+    <meta name="description" content="ONNX Runtime v1.29.0 killed WebGL and JSEP a day before WebNN hit W3C Candidate Recommendation Draft. The changelog says more than the standards news does.">
+    <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<div class="container">
+    <header>
+        <a href="../index.html" class="logo">kmadiar_@_dev:~#</a>
+        <div class="meta-links" style="margin-top: 10px;">
+            <a href="../index.html">&larr; Back to Home</a>
+            <a href="https://github.com/kmadiar" target="_blank" rel="noopener">GitHub</a>
+            <a href="../contact.html">Contact</a>
+        </div>
+    </header>
+
+    <main>
+        <article>
+            <div class="post-header">
+                <div class="post-date">August 13, 2026</div>
+                <h1>ONNX Runtime just deprecated WebGL and JSEP. Read the changelog, not the WebNN press release.</h1>
+                <div class="tags">
+                    <span class="tag">#on-device</span>
+                    <span class="tag">#webgpu</span>
+                    <span class="tag">#webnn</span>
+                    <span class="tag">#onnxruntime</span>
+                    <span class="tag">#npu</span>
+                </div>
+            </div>
+
+            <p><a href="https://github.com/microsoft/onnxruntime/releases/tag/v1.29.0" target="_blank" rel="noopener">ONNX Runtime v1.29.0</a> shipped yesterday with a one-line breaking change that ends a four-year era:</p>
+
+            <blockquote><p>onnxruntime-web has announced the deprecation of WebGL and JSEP. The native WebGPU EP is the recommended path going forward. See the deprecation and migration plans for details (#29716, #31683).</p></blockquote>
+
+            <p>If you're running ONNX in a browser today you are almost certainly on one of these two. WebGL was the original path &mdash; inference smuggled through fragment shaders, because that was the only compute a browser would give you. JSEP was the clever bridge: a JavaScript Execution Provider that let the WASM build call out to a JS-implemented WebGPU backend, shipped years before a native WebGPU EP existed.</p>
+
+            <p>Both were workarounds for a missing primitive. The primitive exists now, so they're going away. Migration plans are in #29716 and #31683, and this is a real one &mdash; start it.</p>
+
+            <h2>Count the changelog lines</h2>
+
+            <p>Today, W3C published <a href="https://www.w3.org/TR/2026/CRD-webnn-20260813/" target="_blank" rel="noopener">WebNN as a Candidate Recommendation Draft</a>. The framing in most coverage will be "browser NPU access is arriving." I'd read the ONNX Runtime changelog before believing it, because that document is the best available signal for where the engineering hours actually go.</p>
+
+            <p>Here is the WebNN EP section of v1.29.0, in full:</p>
+
+            <blockquote><p>Added uint8-packed 4-bit <code>GatherBlockQuantized</code> and <code>LpNormalization</code>, reused the shared WASM loader for Blob-backed external data, and fixed per-axis QDQ and MatMulNBits edge cases.</p></blockquote>
+
+            <p>One sentence. Now the WebGPU EP section, abbreviated:</p>
+
+            <table>
+                <thead>
+                    <tr><th>Area</th><th>What landed in v1.29.0</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>New operators</td><td>DFT, HardSwish, Max/Min, Trilu, GRU, PRelu, MatMulBnb4, MRotaryEmbedding</td></tr>
+                    <tr><td>Integer support</td><td>Expanded across Clip, Reshape, Cast, Add, Tile, Concat, Expand, Gather, CumSum, Max, Min</td></tr>
+                    <tr class="highlight-row"><td>Attention</td><td>Initial WebGPU PagedAttention implementation; Softmax and non-flash Attention moved to online algorithms</td></tr>
+                    <tr><td>Precision</td><td>MatMulNBits wide-tile accumulation precision</td></tr>
+                    <tr><td>Vendor kernels</td><td>Intel subgroup-matrix MatMul/Gemm, including f16, batched-B and odd-N</td></tr>
+                    <tr><td>Latency</td><td>Deferred dispatch and staging-buffer work to cut cold-start; tuned FlashAttention, subgroup Gemm/MatMul, Split-K on Panther Lake, Xe im2col-matmul</td></tr>
+                    <tr><td>Reliability</td><td>Dawn upgrade plus four separate fixes</td></tr>
+                </tbody>
+            </table>
+
+            <p>That's roughly thirty changes against one. <strong>PagedAttention in a browser is a serious piece of work</strong> &mdash; someone is building for long-context LLM inference on the client, and they are building it on WebGPU compute shaders, not on WebNN.</p>
+
+            <h2>Why a graph API can't win this workload</h2>
+
+            <p>The structural reason is the same one that pushed ExecuTorch toward custom Metal.</p>
+
+            <p>WebNN is a graph API: you describe a network, hand it to the browser, and the browser decides how to run it &mdash; possibly on an NPU. That's a good fit for a fixed vision or audio graph. It's a bad fit for an autoregressive decoder, where you need a growing KV cache, paged allocation, dynamic sequence lengths, and the ability to write your own attention kernel. A graph API where you don't control the kernels cannot give you PagedAttention, and PagedAttention is what makes client-side long context tractable.</p>
+
+            <div class="callout">
+                <p><strong>Honest state of browser ML, August 2026:</strong> WebGPU is the answer for LLM inference on the client, and it is now the only supported answer in the largest browser runtime. WebNN is a standards-track API for a different workload, and CR Draft status tells you about spec maturity, not about NPU access you can ship against.</p>
+            </div>
+
+            <h2>Two more things, if you're on mobile rather than web</h2>
+
+            <p>The Qualcomm QNN EP got exactly one item this cycle: <em>"QNN added a reshape handler for split-axis reshapes."</em> XNNPACK got one: dynamic Gemm <code>M</code> read from the input tensor at compute time. There is no Core ML EP item and no NNAPI item anywhere in v1.29.0 &mdash; I read the full notes rather than inferring from a search.</p>
+
+            <p>Meanwhile the Arm story is where the mobile-relevant work actually landed. MLAS picked up:</p>
+
+            <blockquote><p>Arm64 half-precision GEMM and convolution support through KleidiAI, including FP16 MatMul/Gemm/Conv paths and asymmetric Q4 and SME2 MatMulNBits kernels</p></blockquote>
+
+            <p>SME2 kernels for Q4 matmul is the line that matters for phone-class inference, and it's on the CPU, not the NPU.</p>
+
+            <p>The pattern across this release and the ExecuTorch one is consistent enough to state plainly: for LLM decode, the vendor-managed abstraction layers &mdash; WebNN, NNAPI, Core ML, QNN &mdash; are getting maintenance, and the paths where you control the kernel are getting the investment. If your on-device roadmap assumes an NPU delegate will absorb your transformer workload, this is a good week to re-examine that assumption.</p>
+
+            <p>Separately, worth flagging: v1.29.0 enabled POSIX telemetry on Linux, macOS, Android and iOS for builds compiled with telemetry on. <code>ORT_DISABLE_TELEMETRY=1</code> before initialization turns it off. WASM stays telemetry-free. Check what your build flags do.</p>
+
+            <p class="back-link" style="margin-top: 40px;">&larr; <a href="../index.html">Back to index</a></p>
+        </article>
+    </main>
+
+    <footer>
+        <p>&copy; 2026 kmadiar.dev</p>
+    </footer>
+</div>
+
+</body>
+</html>

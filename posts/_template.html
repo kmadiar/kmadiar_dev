@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>POST TITLE | kmadiar.dev</title>
+    <meta name="description" content="ONE-SENTENCE SUMMARY.">
+    <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<div class="container">
+    <header>
+        <a href="../index.html" class="logo">kmadiar_@_dev:~#</a>
+        <div class="meta-links" style="margin-top: 10px;">
+            <a href="../index.html">&larr; Back to Home</a>
+            <a href="https://github.com/kmadiar" target="_blank" rel="noopener">GitHub</a>
+            <a href="../contact.html">Contact</a>
+        </div>
+    </header>
+
+    <main>
+        <article>
+            <div class="post-header">
+                <div class="post-date">MONTH DD, YYYY</div>
+                <h1>POST TITLE</h1>
+                <div class="tags">
+                    <span class="tag">#tag-one</span>
+                    <span class="tag">#tag-two</span>
+                </div>
+            </div>
+
+            <!-- Open with the substance. No filler intro paragraph. -->
+            <p>Lead paragraph, with the <a href="https://example.com" target="_blank" rel="noopener">primary source</a> linked on first mention.</p>
+
+            <h2>Section heading</h2>
+
+            <p>Body copy.</p>
+
+            <!-- Data table. Add class="highlight-row" to the <tr> that carries the argument. -->
+            <table>
+                <thead>
+                    <tr><th>Column</th><th>Column</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>value</td><td>value</td></tr>
+                    <tr class="highlight-row"><td>value</td><td>value</td></tr>
+                </tbody>
+            </table>
+
+            <!-- Verbatim quote from a primary source. Use [&hellip;] for elisions. -->
+            <blockquote><p>Quoted text.</p></blockquote>
+
+            <!-- Pull out the one-line takeaway. -->
+            <div class="callout">
+                <p><strong>The rule this implies:</strong> takeaway.</p>
+            </div>
+
+            <pre><code>$ command --flag</code></pre>
+
+            <p class="back-link" style="margin-top: 40px;">&larr; <a href="../index.html">Back to index</a></p>
+        </article>
+    </main>
+
+    <footer>
+        <p>&copy; 2026 kmadiar.dev</p>
+    </footer>
+</div>
+
+</body>
+</html>
+
+<!--
+PUBLISHING CHECKLIST
+1. Copy this file to posts/YYYY-MM-DD-slug.html
+2. Fill in title, meta description, date, tags, body.
+3. Add a card to index.html immediately after the POSTS:START marker comment
+   (newest first) in this shape:
+
+       <div class="post-card">
+           <div class="post-date">MONTH DD, YYYY</div>
+           <h3 class="post-title"><a href="posts/YYYY-MM-DD-slug.html">TITLE</a></h3>
+           <p>One- or two-sentence summary.</p>
+           <div class="tags">
+               <span class="tag">#tag-one</span>
+           </div>
+       </div>
+
+4. Every number in the post must be traceable to a primary source that was
+   actually read. Link the source. Do not quote a benchmark second-hand.
+5. Commit. Do not push without review.
+-->

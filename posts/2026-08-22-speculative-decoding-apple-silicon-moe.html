@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Speculative decoding is not a free 2x on Apple Silicon | kmadiar.dev</title>
+    <meta name="description" content="Liquid AI shipped a speculative decoding result with 85% draft acceptance and a 1.04x speedup. Why MoE and unified memory break the usual assumptions.">
+    <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+    <div class="container">
+        <header>
+            <a href="../index.html" class="logo">kmadiar_@_dev:~#</a>
+            <div class="meta-links" style="margin-top: 10px;">
+                <a href="../index.html">&larr; Back to Home</a>
+                <a href="https://github.com/kmadiar" target="_blank" rel="noopener">GitHub</a>
+                <a href="../contact.html">Contact</a>
+            </div>
+        </header>
+
+        <main>
+            <article>
+                <div class="post-header">
+                    <div class="post-date">August 22, 2026</div>
+                    <h1>Speculative decoding is not a free 2x on Apple Silicon, and MoE makes it worse</h1>
+                    <div class="tags">
+                        <span class="tag">#on-device</span>
+                        <span class="tag">#apple-silicon</span>
+                        <span class="tag">#metal</span>
+                        <span class="tag">#llama-cpp</span>
+                    </div>
+                </div>
+
+                <p>Liquid AI released <a href="https://www.liquid.ai/blog/lfm2.5-dspark" target="_blank">DSpark draft models for the LFM2.5 family</a> on Wednesday. Three ~300M-parameter sidecar drafters (5 attention-only layers, a Markov-chain sequential head, a confidence head, block size 9) for LFM2.5-1.2B-Instruct, LFM2.5-2.6B, and LFM2.5-8B-A1B, with day-one GGUF and a llama.cpp integration.</p>
+
+                <p>The dense results are good. On an M4 Max MacBook Pro, llama.cpp + Metal, FP16 GGUF, batch size 1, temp 0:</p>
+
+                <table>
+                    <thead>
+                        <tr><th>Model</th><th>Mean speedup, M4 Max</th><th>Mean speedup, H100</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr><td>LFM2.5-1.2B-Instruct</td><td>2.54x (138 &rarr; 350 tok/s)</td><td>2.10x (656 &rarr; 1384 tok/s)</td></tr>
+                        <tr><td>LFM2.5-2.6B</td><td>2.27x (61 &rarr; 139 tok/s)</td><td>2.67x (323 &rarr; 864 tok/s)</td></tr>
+                        <tr class="highlight-row"><td>LFM2.5-8B-A1B (MoE)</td><td>1.18x (90 &rarr; 106 tok/s)</td><td>2.54x (418 &rarr; 1074 tok/s)</td></tr>
+                    </tbody>
+                </table>
+
+                <p>Look at the last row, then look at its acceptance rate: <strong>6.95 out of 10 on average, and 8.52 on MT-Bench</strong> &mdash; the highest acceptance numbers in the entire post. MT-Bench specifically went from 87 to 90 tok/s. A 1.04x speedup on an 85% acceptance rate.</p>
+
+                <p>This is the single most useful number Liquid published, and it's the one nobody will quote. It severs the link between acceptance rate and wall-clock speedup that most speculative-decoding writeups quietly assume. Their own explanation:</p>
+
+                <blockquote><p>[&hellip;] the current MoE implementation in llama.cpp's Metal backend, and [&hellip;] the fact that verifying k tokens activates more experts and thus more weight traffic than a single decode step.</p></blockquote>
+
+                <h2>Why the second clause is the important one</h2>
+
+                <p>That second clause is the structural part, and it isn't a llama.cpp bug you can wait out.</p>
+
+                <p>Speculative decoding works because decode is memory-bound: you amortise one pass of weight streaming across k tokens. For a dense model, verifying 9 tokens streams the same weights as verifying 1. For an 8B-A1B MoE, each of the 9 candidate tokens can route to a different expert set, so the union of activated experts over the block is much larger than the single-token set. You pay for the amortisation up front in extra weight traffic. On an H100 with roughly 3.35 TB/s of HBM you don't notice. On an M4 Max at up to 546 GB/s you notice immediately.</p>
+
+                <div class="callout">
+                    <p><strong>The rule this implies:</strong> the sparser the model, the less speculative decoding buys you on unified memory &mdash; and the direction of the error is the opposite of what your intuition says. A high acceptance rate on an MoE is a signal that you're about to activate a lot of experts, not that you're about to go fast.</p>
+                </div>
+
+                <h2>Two caveats before you plan a release around these numbers</h2>
+
+                <p>First, the on-device measurements use <strong>FP16 GGUF weights</strong>. Nobody ships FP16 on device. At Q4, the baseline decode gets roughly 4x cheaper in weight traffic while the verification compute stays where it is, so the arithmetic intensity of the whole setup shifts toward compute-bound &mdash; exactly the regime where speculation stops paying. I'd expect the Q4 speedups to be materially lower than these, and I'd want to see that table before committing a drafter to a release build.</p>
+
+                <p>Liquid's own interactivity charts make the same argument in a different variable: on an H100, 2.6B performance "converges around bs=128 for block size 9," because concurrency and speculation are buying you the same thing. As arithmetic intensity rises you leave the memory-bound regime where speculation pays.</p>
+
+                <p>Second, the numbers were produced with <a href="https://github.com/ggml-org/llama.cpp/pull/27441" target="_blank">experimental Metal kernels from an unmerged PR</a>, not stock llama.cpp. Worth checking what you actually get on the build you're shipping.</p>
+
+                <h2>What's actually good here</h2>
+
+                <p>None of this makes DSpark a bad release. The dense on-device numbers are real, the quality guarantee is exact under greedy decoding by construction, and the 57% average function-call latency reduction for the 2.6B is the most convincing on-device agentic number I've seen this quarter &mdash; reasoning-before-tool-call is precisely where a user sits and waits.</p>
+
+                <p>But I want to name what's good here that has nothing to do with the models: they had a 1.04x result on their most-hyped architecture and shipped the table. Most vendors would have dropped the MoE row, kept "up to 3.18x" in the headline, and been technically honest. Publishing the number where the technique doesn't work is what makes the numbers where it does work believable.</p>
+
+                <p>If you're evaluating speculative decoding for an on-device deployment: test on your quantization, on your model's sparsity pattern, on your target silicon. Acceptance rate is not the metric. Tokens per second is.</p>
+
+                <p class="back-link" style="margin-top: 40px;">&larr; <a href="../index.html">Back to index</a></p>
+            </article>
+        </main>
+
+        <footer>
+            <p>&copy; 2026 kmadiar.dev</p>
+        </footer>
+    </div>
+
+</body>
+</html>

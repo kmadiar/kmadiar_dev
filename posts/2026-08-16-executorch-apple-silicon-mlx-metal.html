@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ExecuTorch's Apple Silicon path is MLX and hand-written Metal | kmadiar.dev</title>
+    <meta name="description" content="Meta's flagship on-device model demo runs on Apple Silicon through neither Core ML nor MPS. What that means if you're choosing a backend today.">
+    <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<div class="container">
+    <header>
+        <a href="../index.html" class="logo">kmadiar_@_dev:~#</a>
+        <div class="meta-links" style="margin-top: 10px;">
+            <a href="../index.html">&larr; Back to Home</a>
+            <a href="https://github.com/kmadiar" target="_blank" rel="noopener">GitHub</a>
+            <a href="../contact.html">Contact</a>
+        </div>
+    </header>
+
+    <main>
+        <article>
+            <div class="post-header">
+                <div class="post-date">August 16, 2026</div>
+                <h1>ExecuTorch's Apple Silicon path is MLX and hand-written Metal. Not Core ML, not MPS.</h1>
+                <div class="tags">
+                    <span class="tag">#on-device</span>
+                    <span class="tag">#apple-silicon</span>
+                    <span class="tag">#executorch</span>
+                    <span class="tag">#mlx</span>
+                    <span class="tag">#quantization</span>
+                </div>
+            </div>
+
+            <p>Meta's ExecuTorch team published <a href="https://pytorch.org/blog/fast-ondevice-agentic-ai-with-executorch/" target="_blank" rel="noopener">their Muse Glimmer on-device writeup</a> on Aug 10, and ExecuTorch 1.4.1 hit PyPI on Aug 14. Read the two together and the Apple Silicon backend question gets a clear, slightly awkward answer.</p>
+
+            <p>Here is how the post describes lowering:</p>
+
+            <blockquote><p>you export to ExecuTorch, and the framework handles backend-specific lowering, Triton on CUDA, MLX-native and custom Metal on Apple silicon.</p></blockquote>
+
+            <p>And more specifically:</p>
+
+            <blockquote><p><strong>MLX</strong> &mdash; RMSNorm, RoPE, SDPA, KV-cache updates, and quantized linear operations are lowered to MLX-native or custom Metal implementations.</p></blockquote>
+
+            <p>Core ML is not mentioned in the post. MPS is not mentioned in the post. The flagship Apple-silicon demo for PyTorch's own on-device runtime goes through a research framework Apple publishes on GitHub and a pile of hand-written Metal, and routes around both of the delegates Apple ships in the OS.</p>
+
+            <p>The build reflects it:</p>
+
+            <pre><code># NVIDIA CUDA (Linux or Windows)
+(cd examples/models/muse-glimmer &amp;&amp; cmake --workflow --preset muse-glimmer-cuda)
+# Apple Silicon (macOS)
+(cd examples/models/muse-glimmer &amp;&amp; cmake --workflow --preset muse-glimmer-mlx)</code></pre>
+
+            <p>Two presets. CUDA and MLX. That's the shipping matrix.</p>
+
+            <h2>The K-quant repacking trick is the part worth stealing</h2>
+
+            <p>The quantization plumbing is the most interesting part of the post, and it's useful regardless of what you think of ExecuTorch. They export from GGUF checkpoints directly and map K-quants onto backend-native formats:</p>
+
+            <blockquote><p>We map Q4_K/Q5_K/Q6_K to packed INT4/5/6 with dp4a GEMV kernels on CUDA, and to repacked or fused Metal kernels on MLX.</p></blockquote>
+
+            <blockquote><p>On MLX, for performance, at repack time we merge adjacent sub-blocks whose scale and min are identical into a larger group size, up to 128, whenever the merge is lossless.</p></blockquote>
+
+            <p>That second one is a nice piece of work. K-quants use small sub-blocks with per-sub-block scale and min; MLX's affine quantization is faster at larger group sizes because you touch less scale/bias metadata per unit of weight. The obvious options are both bad &mdash; requantize and take a quality hit, or eat the small-group cost and be slow. Instead they scan for adjacent sub-blocks that happen to share scale and min, and merge those for free. In practice K-quant checkpoints have a lot of them.</p>
+
+            <p>This is the kind of format-bridging that never shows up in a benchmark chart and largely determines whether your GGUF runs at a reasonable speed.</p>
+
+            <p>Reported result: on an M5 Pro with 64 GiB, Muse Glimmer text-image does <strong>21.6 tok/s solo and 33.0 tok/s with DFlash speculative decoding &mdash; a 52.8% improvement without quality regression.</strong> For a 30B model at roughly 4-bit (under 20 GB for the LM), that's a usable interactive rate. Note it's the only hard number stated in the post's text; the A100-vs-M5-Max comparison in Figure 3 is chart-only, so don't quote it.</p>
+
+            <h2>The awkward part</h2>
+
+            <p>ExecuTorch's MPS backend was marked deprecated back in v1.2.0 with an explicit target: <em>"The MPS backend is deprecated and will be removed in a future release (v1.4.0)."</em> By v1.3.1 that had softened to <em>"remains deprecated and is expected to be removed in a future release"</em> &mdash; the version target quietly dropped. And the live PyPI description for 1.4.1, dated Aug 14, still says: <em>"[macOS only] Core ML and MPS backend are also linked into the prebuilt module."</em></p>
+
+            <p>So MPS is not removed. It's deprecated, unreferenced in the flagship post, and still in the wheel.</p>
+
+            <p>Core ML is in a different position &mdash; actively maintained (v1.3.1 shipped a profiler crash fix, partitioner skips for unsupported random and argmin/argmax patterns, iOS 18 quantization error hints) but conspicuously absent from the LLM story.</p>
+
+            <p>Which tracks. Core ML's delegate is genuinely good at what it was designed for: fixed-shape vision and audio graphs you want resident on the ANE. It has never been the right vehicle for a KV-cached autoregressive decoder with dynamic sequence lengths, and the industry has now voted on that twice &mdash; once through llama.cpp choosing raw Metal, and now through ExecuTorch choosing MLX plus custom kernels.</p>
+
+            <div class="callout">
+                <p><strong>If you're picking a target today:</strong> for LLMs on Apple Silicon, go MLX or write Metal. For vision and audio models where you want ANE residency and the battery win that comes with it, Core ML is still the answer and nothing this week changes that. MPS is not a target for new work in any case.</p>
+            </div>
+
+            <p>One operational note if you go the ExecuTorch route: CUDA exports must be done on the same GPU architecture that will run the artifact &mdash; <em>"For the best results, export on the same GPU architecture that will run the artifact."</em> Plan your build machines accordingly.</p>
+
+            <p class="back-link" style="margin-top: 40px;">&larr; <a href="../index.html">Back to index</a></p>
+        </article>
+    </main>
+
+    <footer>
+        <p>&copy; 2026 kmadiar.dev</p>
+    </footer>
+</div>
+
+</body>
+</html>
