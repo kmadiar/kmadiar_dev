@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Apple's 4.3x is a prefill number | kmadiar.dev</title>
+    <meta name="description" content="The M5 Ultra Mac Studio claims 4.3x faster AI. It's a prefill number, and a soft-failing Metal 4 capability check can silently cost you most of it.">
+    <link rel="stylesheet" href="../style.css">
+    <!-- Analytics: GoatCounter. Cookie-free, no PII, no consent banner needed.
+         REPLACE "YOURCODE" with your GoatCounter subdomain before pushing. -->
+    <script data-goatcounter="https://YOURCODE.goatcounter.com/count"
+            async src="//gc.zgo.at/count.js"></script>
+</head>
+<body>
+
+    <div class="container">
+        <header>
+            <a href="../index.html" class="logo">kmadiar_@_dev:~#</a>
+            <div class="meta-links" style="margin-top: 10px;">
+                <a href="../index.html">&larr; Back to Home</a>
+                <a href="https://github.com/kmadiar" target="_blank" rel="noopener">GitHub</a>
+                <a href="../contact.html">Contact</a>
+            </div>
+        </header>
+
+        <main>
+            <article>
+                <div class="post-header">
+                    <div class="post-date">August 28, 2026</div>
+                    <h1>Apple's 4.3x is a prefill number, and one init-time check decides whether you get it</h1>
+                    <div class="tags">
+                        <span class="tag">#on-device</span>
+                        <span class="tag">#apple-silicon</span>
+                        <span class="tag">#metal</span>
+                        <span class="tag">#llama-cpp</span>
+                    </div>
+                </div>
+
+                <p>Apple announced the <a href="https://www.apple.com/newsroom/2026/08/apple-introduces-new-mac-studio-with-m5-max-and-m5-ultra/" target="_blank" rel="noopener">M5 Max and M5 Ultra Mac Studio</a> on Monday: up to 512GB of unified memory, 1.2TB/s of memory bandwidth, Neural Accelerators in every GPU core, and the headline claim of "up to 4.3x faster AI performance." Pre-orders are open, machines ship September 22, 512GB configs in late October.</p>
+
+                <p>The 4.3x is real. It is also, specifically, a prompt-processing number &mdash; and whether your machine delivers it comes down to a capability check your inference runtime runs once at startup and reports in a log line almost nobody reads.</p>
+
+                <h2>What 4.3x measures</h2>
+
+                <p>Apple's own footnoted benchmarks are unambiguous about where the gain lives. For M5 Ultra: "up to 9.8x faster LLM prompt processing in LM Studio when compared to Mac Studio with M1 Ultra, and up to 4x faster than M3 Ultra." For M5 Max: 10.7x against M1 Max, 3.9x against M4 Max. Every LLM figure in the release is a <em>prompt processing</em> figure.</p>
+
+                <p>That is the honest place to put it. The M5 generation's addition is matmul hardware &mdash; Neural Accelerators in each GPU core, on an Ultra chip for the first time &mdash; and prefill is compute-bound, so dedicated matmul units move it a lot. Decode is not compute-bound. Token generation streams the active weights out of DRAM once per token, so the number governing your tokens/sec is 1.2TB/s of memory bandwidth, which Apple describes as "50 percent higher than before." Fifty percent, not 4.3x.</p>
+
+                <p>So the mental model for an M3 Ultra owner reading this announcement is roughly 4x on time-to-first-token and roughly 1.5x on generation. Which is a good trade, because prefill is where long-context RAG and agent loops actually spend their wall clock. It's just not the trade the headline implies.</p>
+
+                <h2>The check that decides whether you get any of it</h2>
+
+                <p>The accelerators are reached through Metal 4's tensor APIs. llama.cpp has upstream support (<a href="https://github.com/ggml-org/llama.cpp/pull/16634" target="_blank" rel="noopener">PR #16634</a>) that probes for them at device init and enables the fast path on M5/A19-class hardware. When the probe passes, the log says <code>has tensor = true</code>. When it fails, you get this instead:</p>
+
+                <pre><code>ggml_metal_device_init: - the tensor API is not supported
+in this environment - disabling</code></pre>
+
+                <p>and the model loads anyway, runs anyway, and generates at exactly the same speed as before. Nothing errors. Nothing warns.</p>
+
+                <p>There is a <a href="https://github.com/lmstudio-ai/lmstudio-bug-tracker/issues/2040" target="_blank" rel="noopener">still-open LM Studio issue</a> documenting this on an M5 Max MacBook Pro (128GB, macOS 26.5, runtime <code>llama.cpp-mac-arm64-apple-metal-advsimd@2.21.0</code>): the bundled runtime fails the probe on every GGUF load, while a stock upstream llama.cpp binary on the same machine and the same model files passes it. The reporter's diagnosis is that the shipped Metal library was built against a pre-Metal-4 SDK or deployment target, so the test kernels fail to compile at init &mdash; the code is there, the probe just never succeeds.</p>
+
+                <p>Their A/B, via <code>llama-bench -fa 1 -p 2048 -n 128 -r 2</code> with the path toggled by <code>GGML_METAL_TENSOR_DISABLE=1</code>:</p>
+
+                <table>
+                    <thead>
+                        <tr><th>Model (GGUF)</th><th>tensor OFF</th><th>tensor ON</th><th>delta</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr class="highlight-row"><td>gpt-oss-120b MXFP4 &mdash; pp2048</td><td>877 t/s</td><td>1,833 t/s</td><td>2.09x</td></tr>
+                        <tr class="highlight-row"><td>Step-3.7-Flash IQ3_XXS &mdash; pp2048</td><td>342 t/s</td><td>833 t/s</td><td>2.44x</td></tr>
+                        <tr><td>gpt-oss-120b &mdash; tg128</td><td>104.9 t/s</td><td>105.1 t/s</td><td>unchanged</td></tr>
+                        <tr><td>Step-3.7-Flash &mdash; tg128</td><td>58.2 t/s</td><td>56.0 t/s</td><td>unchanged</td></tr>
+                    </tbody>
+                </table>
+
+                <p>These are the reporter's numbers, not mine &mdash; I don't have M5 hardware to reproduce them on. But the shape is exactly what the architecture predicts, which is what makes them credible: the matmul units move prefill 2&ndash;2.4x and leave decode alone, because decode was never waiting on matmul.</p>
+
+                <div class="callout">
+                    <p><strong>The rule this implies:</strong> a capability check that fails soft is worse than one that fails loud, because the failure mode is indistinguishable from working correctly. Generation speed is unaffected, so the machine feels fine in chat. The 2&ndash;3x you're losing is entirely in time-to-first-token &mdash; long prompts, RAG, agents re-reading tool output. The exact workloads you bought a 128GB M5 for.</p>
+                </div>
+
+                <h2>Why the GGUF path fails and the MLX path doesn't</h2>
+
+                <p>The asymmetry in that issue is the part worth stealing as a design lesson. On the same LM Studio install, the MLX side is fine: it ships an explicit M5-targeted <code>nax</code> runtime pack. The GGUF side ships one universal Metal build and asks it to detect its own capabilities at runtime.</p>
+
+                <p>Both are legitimate strategies. But runtime feature detection only works if the detection can distinguish "this hardware lacks the feature" from "this binary was built wrong" &mdash; and here it can't. The strings in the shipped dylib include <code>tensor API disabled for pre-M5 and pre-A19 devices</code>, so the runtime is doing a hardware-generation check <em>and</em> a compile-time self-test, and collapsing both outcomes into the same silent disable. A user on M5 hardware and a user on M2 hardware get identical logs.</p>
+
+                <p>Note the A19 half of that string, too. This isn't only a desktop problem. Every iPhone with an A19-class chip runs the same probe against whatever Metal library your app bundles.</p>
+
+                <h2>What to actually do</h2>
+
+                <p>Three things, in ascending order of effort.</p>
+
+                <p><strong>Read the init log once.</strong> Load any model on M5-class hardware and grep for the tensor line. Thirty seconds, and it's binary &mdash; either <code>has tensor = true</code> or you're on the slow path.</p>
+
+                <p><strong>Benchmark prefill, not chat feel.</strong> Chat feel is decode, and decode is unaffected, which is precisely why this hides:</p>
+
+                <pre><code>$ llama-bench -m model.gguf -fa 1 -p 2048 -n 128 -r 2
+$ GGML_METAL_TENSOR_DISABLE=1 llama-bench -m model.gguf -fa 1 -p 2048 -n 128 -r 2</code></pre>
+
+                <p>If those two runs produce the same pp2048 number, the fast path was never on.</p>
+
+                <p><strong>If you ship an app that bundles an inference runtime, this is your bug too.</strong> Verify your deployment target and SDK against Metal 4 on real M5/A19 hardware, and log the probe result somewhere you'll see it. Better: fail loud, or ship a hardware-targeted pack the way the MLX side does, instead of trusting one universal binary to be honest about itself.</p>
+
+                <p>Apple shipped genuinely impressive silicon this week, and 1.2TB/s against 512GB of unified memory is a real change in what runs locally. But a hardware multiplier is a ceiling, not a guarantee. The floor is whatever your software stack negotiates at startup &mdash; and right now, on the newest Apple hardware, that negotiation is one line in a log you've never read.</p>
+
+                <p class="back-link" style="margin-top: 40px;">&larr; <a href="../index.html">Back to index</a></p>
+            </article>
+        </main>
+
+        <footer>
+            <p>&copy; 2026 kmadiar.dev</p>
+        </footer>
+    </div>
+
+</body>
+</html>
