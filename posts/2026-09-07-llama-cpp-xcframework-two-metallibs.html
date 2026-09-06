@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>llama.cpp's Metal 4 fast path now ships as two metallibs | kmadiar.dev</title>
+    <meta name="description" content="The silent tensor-API probe failure was a shader-compiler default. The fix disables the fast path for precompiled libraries, which is everything on iOS, so the xcframework now ships a second metallib gated on SDK 26.">
+    <link rel="stylesheet" href="../style.css">
+    <!-- Analytics: GoatCounter. Cookie-free, no PII, no consent banner needed.
+         REPLACE "YOURCODE" with your GoatCounter subdomain before pushing. -->
+    <script data-goatcounter="https://YOURCODE.goatcounter.com/count"
+            async src="//gc.zgo.at/count.js"></script>
+</head>
+<body>
+
+    <div class="container">
+        <header>
+            <a href="../index.html" class="logo">kmadiar_@_dev:~#</a>
+            <div class="meta-links" style="margin-top: 10px;">
+                <a href="../index.html">&larr; Back to Home</a>
+                <a href="https://github.com/kmadiar" target="_blank" rel="noopener">GitHub</a>
+                <a href="../contact.html">Contact</a>
+            </div>
+        </header>
+
+        <main>
+            <article>
+                <div class="post-header">
+                    <div class="post-date">September 7, 2026</div>
+                    <h1>llama.cpp's Metal 4 fast path now ships as two metallibs, and on iPhone the second one is the whole point</h1>
+                    <div class="tags">
+                        <span class="tag">#on-device</span>
+                        <span class="tag">#apple-silicon</span>
+                        <span class="tag">#metal</span>
+                        <span class="tag">#llama-cpp</span>
+                    </div>
+                </div>
+
+                <p>Last week I wrote about a <a href="2026-08-28-m5-tensor-api-prefill-check.html">capability probe that fails soft</a>: llama.cpp's Metal backend checks at init whether the Metal 4 tensor API is available, and when the check fails on M5/A19 hardware you get the old shader-ALU prefill path and no error. The root cause and the fix both landed in <a href="https://github.com/ggml-org/llama.cpp/releases/tag/v0.4.0" target="_blank" rel="noopener">llama.cpp v0.4.0</a> on Friday, and the fix has a specific shape on iOS that anyone bundling llama.cpp in an app should understand.</p>
+
+                <h2>The root cause was the shader compiler's default language version</h2>
+
+                <p>The diagnosis is in <a href="https://github.com/ggml-org/llama.cpp/pull/27461" target="_blank" rel="noopener">PR #27461</a>, opened August 20 by a contributor benchmarking on an M5 Max who noticed prefill was "curiously slow." <code>MTLCompileOptions</code> defaults to an older Metal language version, one that doesn't expose the tensor headers (<code>metal_tensor</code>, <code>MetalPerformancePrimitives</code>) to the shader compiler. Both tensor-API probes in <code>ggml_metal_device_init()</code> therefore fail to compile, and only with verbose logging turned on do you see why:</p>
+
+                <pre><code>program_source:6:17: error: use of undeclared identifier 'mpp'
+using namespace mpp::tensor_ops;</code></pre>
+
+                <p>So <code>has_tensor</code> ended up false on every device, and prefill ran matmuls on general-purpose shader ALUs even on silicon with dedicated matmul units. The PR does two things: request Metal 4.0 explicitly when the device reports tensor support, so unsupported hardware is untouched, and clear <code>has_tensor</code> when the library came from a pre-compiled <code>metallib</code>. That second guard matters more than it looks.</p>
+
+                <h2>Why the second guard forces a two-library design</h2>
+
+                <p>If the Metal library was precompiled, the runtime can't know what language version it was built with, so the safe move is to assume it can't do tensor ops. But on iOS you almost always ship precompiled: compiling MSL from source at app launch is slow, and the xcframework path exists precisely so you don't have to.</p>
+
+                <p>That would have made the guard a permanent "no tensor API on iPhone" rule. <a href="https://github.com/ggml-org/llama.cpp/pull/28163" target="_blank" rel="noopener">PR #28163</a>, merged September 1, is the resolution. The xcframework build now supports <code>GGML_METAL_EMBED_LIBRARY=OFF</code> and produces two libraries:</p>
+
+                <table>
+                    <thead>
+                        <tr><th>Library</th><th>Contents</th><th>Built when</th><th>Loaded when</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr><td><code>default.metallib</code></td><td>Every kernel that has always been there</td><td>Always</td><td>Always</td></tr>
+                        <tr class="highlight-row"><td><code>ggml-tensor.metallib</code></td><td>Metal 4 tensor-API kernels</td><td>SDK 26+, with correct SDK name and <code>-mtargetos</code></td><td>Device passes the tensor probe</td></tr>
+                    </tbody>
+                </table>
+
+                <p>The PR author notes the missing <code>-mtargetos</code> flag was the non-obvious part. At runtime the backend loads the default library everywhere and the tensor library only where the device passes the probe. The PR was tested with <code>llama.swiftui</code> on an iPhone Air (A19 Pro): both metallibs load and the tensor path shows up in the bench. On an older device without tensor support, only <code>default.metallib</code> loads. No numbers are published in the PR, and I don't have an A19 Pro to produce my own, so I won't invent a multiplier here. The shape should match the desktop result from the LM Studio thread: prefill moves, decode doesn't.</p>
+
+                <h2>What this means if you ship llama.cpp in an iOS app</h2>
+
+                <p><strong>Your existing xcframework has no tensor path.</strong> If you built it before September 1, or you build with an SDK older than 26, there is no <code>ggml-tensor.metallib</code> in the bundle and every A19 Pro user runs the slow prefill path. Nothing will tell you.</p>
+
+                <p><strong>Check the bundle, not the log.</strong> The init log line (<code>has tensor = true</code>) is still the source of truth at runtime, but the cheaper check is at build time:</p>
+
+                <pre><code>$ find build-apple/llama.xcframework -name '*.metallib'
+.../ios-arm64/llama.framework/default.metallib
+.../ios-arm64/llama.framework/ggml-tensor.metallib</code></pre>
+
+                <p>If the second file isn't there, your SDK gate failed.</p>
+
+                <p><strong>Deployment target and SDK are now separate decisions.</strong> You can keep a low deployment target for the default library and still get the Metal 4 library compiled against SDK 26. That's what the <code>-mtargetos</code> handling in the PR is for. Before this change, the two were coupled and the coupling silently picked the old path.</p>
+
+                <p><strong>Benchmark prompt processing on a real A19 Pro.</strong> Same advice as last week, now with a concrete reason it applies to phones: run <code>llama-bench -p 512 -n 64</code> in-app on an iPhone 17 Pro or iPhone Air and compare with <code>GGML_METAL_TENSOR_DISABLE=1</code>. If the pp number doesn't change, you're not on the fast path.</p>
+
+                <h2>The design lesson</h2>
+
+                <div class="callout">
+                    <p><strong>The rule this implies:</strong> when a runtime probe can't distinguish "hardware can't" from "binary was built wrong," don't build a smarter probe. Split the artifact so the build system encodes the capability. If the SDK can produce tensor kernels, a second library exists; if not, it doesn't, and the runtime's job shrinks to "is the file there and does the device accept it."</p>
+                </div>
+
+                <p>That's the same shape as the MLX side's device-targeted runtime packs, arrived at from the other direction.</p>
+
+                <p>Apple's event is Wednesday, and if the A20 Pro ships with second-generation Neural Accelerators the tensor path is going to be the default assumption for every new iPhone. Worth spending the afternoon making sure your bundle has two metallibs in it.</p>
+
+                <p class="back-link" style="margin-top: 40px;">&larr; <a href="../index.html">Back to index</a></p>
+            </article>
+        </main>
+
+        <footer>
+            <p>&copy; 2026 kmadiar.dev</p>
+        </footer>
+    </div>
+
+</body>
+</html>

@@ -30,6 +30,17 @@
 
                 <!-- POSTS:START — newest first. Add each new post card directly below this line. -->
                 <div class="post-card">
+                    <div class="post-date">September 7, 2026</div>
+                    <h3 class="post-title"><a href="posts/2026-09-07-llama-cpp-xcframework-two-metallibs.html">llama.cpp's Metal 4 fast path now ships as two metallibs, and on iPhone the second one is the whole point</a></h3>
+                    <p>The silent tensor-API probe failure was a shader-compiler default. The fix disables the fast path for precompiled libraries &mdash; which is everything on iOS &mdash; so the xcframework now ships a second metallib gated on SDK 26.</p>
+                    <div class="tags">
+                        <span class="tag">#on-device</span>
+                        <span class="tag">#apple-silicon</span>
+                        <span class="tag">#metal</span>
+                        <span class="tag">#llama-cpp</span>
+                    </div>
+                </div>
+                <div class="post-card">
                     <div class="post-date">August 28, 2026</div>
                     <h3 class="post-title"><a href="posts/2026-08-28-m5-tensor-api-prefill-check.html">Apple's 4.3x is a prefill number, and one init-time check decides whether you get it</a></h3>
                     <p>The M5 Ultra Mac Studio landed this week. A Metal 4 capability check that fails silently can cost you 2&ndash;3x of its headline gain &mdash; and generation speed looks fine either way.</p>
