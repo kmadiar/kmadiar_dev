@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MiniCPM5-2B's 131k context is 5.25 GiB of KV cache on a phone. The config.json tells you more than the leaderboard. | kmadiar.dev</title>
+    <meta name="description" content="Two KV heads, 42 layers, head_dim 128: MiniCPM5-2B costs 43 KB of KV cache per token, so its 131k window is 5.25 GiB on a phone. Read config.json before the leaderboard, and check which Intelligence Index version a score came from.">
+    <link rel="stylesheet" href="../style.css">
+    <!-- Analytics: GoatCounter. Cookie-free, no PII, no consent banner needed.
+         REPLACE "YOURCODE" with your GoatCounter subdomain before pushing. -->
+    <script data-goatcounter="https://YOURCODE.goatcounter.com/count"
+            async src="//gc.zgo.at/count.js"></script>
+</head>
+<body>
+
+<div class="container">
+    <header>
+        <a href="../index.html" class="logo">kmadiar_@_dev:~#</a>
+        <div class="meta-links" style="margin-top: 10px;">
+            <a href="../index.html">&larr; Back to Home</a>
+            <a href="https://github.com/kmadiar" target="_blank" rel="noopener">GitHub</a>
+            <a href="../contact.html">Contact</a>
+        </div>
+    </header>
+
+    <main>
+        <article>
+            <div class="post-header">
+                <div class="post-date">September 15, 2026</div>
+                <h1>MiniCPM5-2B's 131k context is 5.25 GiB of KV cache on a phone. The config.json tells you more than the leaderboard.</h1>
+                <div class="tags">
+                    <span class="tag">#on-device</span>
+                    <span class="tag">#ios</span>
+                    <span class="tag">#slm</span>
+                    <span class="tag">#kv-cache</span>
+                    <span class="tag">#llama-cpp</span>
+                </div>
+            </div>
+
+            <p>OpenBMB shipped <a href="https://huggingface.co/openbmb/MiniCPM5-2B" target="_blank" rel="noopener">MiniCPM5-2B</a> on September 7: 2,516,756,480 parameters, dense, plain <code>LlamaForCausalLM</code>, Apache 2.0, with GGUF, a 4-bit MLX build and a LiteRT-LM build in the same collection. The model card leads with an average of 53.9 over 34 benchmarks against 51.1 for Qwen3.5-4B. Skip that for a minute and open <code>config.json</code>, because that's where the shipping decisions are.</p>
+            <pre><code>&quot;hidden_size&quot;: 2048,
+&quot;intermediate_size&quot;: 6144,
+&quot;num_hidden_layers&quot;: 42,
+&quot;num_attention_heads&quot;: 16,
+&quot;num_key_value_heads&quot;: 2,
+&quot;head_dim&quot;: 128,
+&quot;max_position_embeddings&quot;: 131072,
+&quot;vocab_size&quot;: 130560,
+&quot;tie_word_embeddings&quot;: false
+</code></pre>
+            <h2>The KV cache arithmetic</h2>
+            <p>Two KV heads at head_dim 128 is aggressive GQA (8:1), and it's the reason a 131k window is even printable on a model card. Per token, per layer, K and V in f16 cost 2 × 2 × 128 × 2 bytes = 1,024 bytes. Over 42 layers that's 43,008 bytes per token. So:</p>
+            <table>
+            <thead>
+            <tr>
+            <th>Context</th>
+            <th>KV cache (f16)</th>
+            </tr>
+            </thead>
+            <tbody>
+            <tr>
+            <td>4,096</td>
+            <td>168 MiB</td>
+            </tr>
+            <tr>
+            <td>8,192</td>
+            <td>336 MiB</td>
+            </tr>
+            <tr>
+            <td>16,384</td>
+            <td>672 MiB</td>
+            </tr>
+            <tr>
+            <td>32,768</td>
+            <td>1.31 GiB</td>
+            </tr>
+            <tr>
+            <td>131,072</td>
+            <td>5.25 GiB</td>
+            </tr>
+            </tbody>
+            </table>
+            <p>The Q4_K_M GGUF is 1.56 GB, the way Hugging Face counts it, so mind the units in the comparisons below: 5.25 GiB of cache is 5.64 GB decimal. At 16k context the cache is already 45% of the weights; at the advertised 131k it's 3.6x the weights, before activations, before your app, before the OS. <code>-ctk q8_0 -ctv q8_0</code> halves it and nothing in this architecture makes that a bad trade. The honest phone number for this model is 8k to 16k, and you should size the context from this table rather than from the "131,072" on the card.</p>
+            <h2>The embedding tax</h2>
+            <p>21% of the parameters are embeddings: 130,560 × 2,048 × 2 (untied) = 534.8M, which is exactly the gap between the total and the 1,981,982,720 "non-embedding" figure OpenBMB quotes. The input side is free at decode time (one row lookup). The output head is not: every decoded token reads all 267M <code>lm_head</code> parameters. In a memory-bandwidth-bound decode loop, bytes touched per token is roughly non-embedding weights plus <code>lm_head</code>, about 2.25B parameters at whatever bit-width your quant gives them. A 130k vocab is nice for Chinese and code tokenization; it's also a fixed ~12% surcharge on every token you generate. Plan for it.</p>
+            <p>The other shape note: 42 layers at hidden 2048 is deep and narrow for 2.5B. Depth is sequential; on Metal every layer is another set of command-encoder dispatches on the decode critical path, and at batch size 1 that overhead doesn't amortize. Whether that matters versus a shallower 2B depends on your runtime's per-op cost, so bench <code>llama-bench -n 128</code> on your target device, not a Mac.</p>
+            <h2>Which "Intelligence Index" number</h2>
+            <p>OpenBMB's announcement says MiniCPM5-2B scores 23 on the Artificial Analysis Intelligence Index. <a href="https://artificialanalysis.ai/articles/openbmb-releases-minicpm5-2b" target="_blank" rel="noopener">Artificial Analysis's own writeup</a>, published the same day, says 15. Both are true: 23 was v4.1.1, 15 is v4.2, and AA states in the article that "scores across the two versions are not directly comparable." When you see an index score in a launch post this month, check the version. AA bumped the index twice in a week (v4.2 on September 4, v4.3 on September 7).</p>
+            <p>The parts of AA's evaluation that matter for a phone are these. It used 19k output tokens per index task, 11k of them reasoning, joint-lowest among the models AA compared and about a third of Ling 3.0 Tiny's 56k. At phone decode speeds that gap is the difference between an answer and a spinner. Its AA-Omniscience result is a non-hallucination rate of 78% earned by attempting only 29% of questions, with 8% accuracy; that's a model that declines rather than guesses, which is the right default for an offline assistant and a wrong one for a knowledge lookup. And it's a hybrid-thinking model: <code>enable_thinking</code> in the chat template switches modes. Ship it with thinking off by default and turn it on per request. AA's August mobile study showed that at a 60-second answer budget on an iPhone 17 Pro, reasoning-heavy 3B models fell to the bottom of the table because their reasoning never finished.</p>
+            <h2>What to actually do</h2>
+            <p>Pull the Q4_K_M GGUF and the <code>litert-community/MiniCPM5-2B</code> build, run both at 8k context on the oldest device you support, and record peak memory and tokens per second with thinking off. If tool calling is your use case, this is the model to test: 97.1 on τ²-Bench Telecom and 66.6 on BFCL v4 in OpenBMB's table, and AA's independent τ³-Banking run put it joint-first with Ling 3.0 Tiny at 21%, against 8% for the next model. If knowledge recall is your use case, it isn't.</p>
+            <div class="callout"><p><strong>The rule this implies:</strong> a small model's context window is a claim about the weights, not about your memory budget. Multiply layers × KV heads × head_dim × 4 bytes and decide the window yourself.</p></div>
+
+            <p class="back-link" style="margin-top: 40px;">&larr; <a href="../index.html">Back to index</a></p>
+        </article>
+    </main>
+
+    <footer>
+        <p>&copy; 2026 kmadiar.dev</p>
+    </footer>
+</div>
+
+</body>
+</html>

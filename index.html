@@ -30,6 +30,17 @@
 
                 <!-- POSTS:START — newest first. Add each new post card directly below this line. -->
                 <div class="post-card">
+                    <div class="post-date">September 15, 2026</div>
+                    <h3 class="post-title"><a href="posts/2026-09-15-minicpm5-2b-kv-cache-config-json.html">MiniCPM5-2B's 131k context is 5.25 GiB of KV cache on a phone. The config.json tells you more than the leaderboard.</a></h3>
+                    <p>Two KV heads, 42 layers, head_dim 128 &mdash; 43 KB per token. The honest window on a phone is 8k&ndash;16k, and the 130k vocab is a fixed surcharge on every token you decode.</p>
+                    <div class="tags">
+                        <span class="tag">#on-device</span>
+                        <span class="tag">#ios</span>
+                        <span class="tag">#slm</span>
+                        <span class="tag">#kv-cache</span>
+                    </div>
+                </div>
+                <div class="post-card">
                     <div class="post-date">September 7, 2026</div>
                     <h3 class="post-title"><a href="posts/2026-09-07-llama-cpp-xcframework-two-metallibs.html">llama.cpp's Metal 4 fast path now ships as two metallibs, and on iPhone the second one is the whole point</a></h3>
                     <p>The silent tensor-API probe failure was a shader-compiler default. The fix disables the fast path for precompiled libraries &mdash; which is everything on iOS &mdash; so the xcframework now ships a second metallib gated on SDK 26.</p>
