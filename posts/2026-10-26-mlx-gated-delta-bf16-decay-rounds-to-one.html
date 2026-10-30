@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>In bf16, a decay of 0.9995 is 1.0 | kmadiar.dev</title>
+    <meta name="description" content="MLX cast the gated delta net decay to the activation dtype. In bf16 that rounds 27% of gate values to exactly 1.0, and a state that never decays is not a bug the loss curve will tell you about.">
+    <link rel="stylesheet" href="../style.css">
+    <!-- Analytics: GoatCounter. Cookie-free, no PII, no consent banner needed.
+         REPLACE "YOURCODE" with your GoatCounter subdomain before pushing. -->
+    <script data-goatcounter="https://YOURCODE.goatcounter.com/count"
+            async src="//gc.zgo.at/count.js"></script>
+</head>
+<body>
+
+<div class="container">
+    <header>
+        <a href="../index.html" class="logo">kmadiar_@_dev:~#</a>
+        <div class="meta-links" style="margin-top: 10px;">
+            <a href="../index.html">&larr; Back to Home</a>
+            <a href="https://github.com/kmadiar" target="_blank" rel="noopener">GitHub</a>
+            <a href="../contact.html">Contact</a>
+        </div>
+    </header>
+
+    <main>
+        <article>
+            <div class="post-header">
+                <div class="post-date">October 26, 2026</div>
+                <h1>In bf16, a decay of 0.9995 is 1.0</h1>
+                <div class="tags">
+                    <span class="tag">#mlx</span>
+                    <span class="tag">#metal</span>
+                    <span class="tag">#numerics</span>
+                    <span class="tag">#linear-attention</span>
+                    <span class="tag">#on-device</span>
+                </div>
+            </div>
+
+            <p>MLX merged <a href="https://github.com/ml-explore/mlx/pull/4760" target="_blank" rel="noopener">PR #4760</a> this morning. Five files, +19/&minus;17, and four of the five files do nothing but swap a buffer declaration from <code>InT</code> to <code>float</code>. The whole fix in <code>mlx/fast.cpp</code> is two lines:</p>
+
+<pre><code>- auto g = astype(gates, out_dtype, s);
+- auto beta = astype(beta_, out_dtype, s);
++ // The decay sits close to 1, where a 16-bit type has too few mantissa
++ // bits, so gates and beta stay float32 regardless of the type of q.
++ auto g = astype(gates, float32, s);
++ auto beta = astype(beta_, float32, s);</code></pre>
+
+            <p><code>out_dtype</code> is promoted from <code>queries</code> and <code>keys</code>. So if you ran a bf16 model, which is the usual case, MLX took your float32 decay and rounded it down to bf16 before the kernel ever saw it.</p>
+
+            <h2>Why that specific cast is fatal</h2>
+
+            <p>The docstring is explicit about what <code>gamma</code> is: &ldquo;Decay rate in linear space&rdquo;. Not a log. A number just under 1.</p>
+
+            <p>bf16 has 8 head mantissa bits. In <code>[0.5, 1)</code> the spacing is 2<sup>&minus;8</sup> = 0.00390625, so the largest bf16 strictly below 1.0 is 0.99609375. Everything above that rounds to exactly 1.0:</p>
+
+            <table>
+                <thead>
+                    <tr><th>true g</th><th>bf16</th><th>fp16</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>0.99</td><td>0.98828125</td><td>0.990234375</td></tr>
+                    <tr><td>0.995</td><td>0.99609375</td><td>0.9951171875</td></tr>
+                    <tr class="highlight-row"><td>0.9995</td><td>1.0</td><td>0.99951171875</td></tr>
+                    <tr><td>0.9999</td><td>1.0</td><td>1.0</td></tr>
+                </tbody>
+            </table>
+
+            <p>A decay of exactly 1.0 is not &ldquo;slightly wrong&rdquo;. It is a different model. The recurrent kernel at <code>mlx/backend/metal/kernels/gated_delta_update.h</code> does the multiply directly:</p>
+
+<pre><code>state[i] = state[i] * g_[hv_idx];</code></pre>
+
+            <p>and the chunked kernel takes the log first, prefix-sums it across the chunk, then exponentiates:</p>
+
+<pre><code>float g_val = (thread_index_in_simdgroup &lt; (uint)valid_rows)
+    ? metal::fast::log(metal::max(
+          static_cast&lt;float&gt;(g_[thread_index_in_simdgroup * Hv + hv_idx]), 1e-6f))
+    : 0.0f;
+float gamma_val = simd_prefix_inclusive_sum(g_val);</code></pre>
+
+            <p><code>log(1.0f)</code> is 0. Every <code>gamma_*</code> downstream becomes <code>exp(0) == 1</code>. The head doesn't decay a little less; for that chunk it is a plain delta rule with infinite memory.</p>
+
+            <h2>The bug report</h2>
+
+            <p><a href="https://github.com/ml-explore/mlx/issues/4725" target="_blank" rel="noopener">Issue #4725</a>, filed October 19 by jvmenen, is the kind of bug report you wish you got. T = 4096, 16 key heads, 48 value heads, head dim 128, NAX route, M5 Pro, errors against a float64 reference:</p>
+
+            <table>
+                <thead>
+                    <tr><th>inputs</th><th>output err</th><th>state err</th><th>ms</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>bf16 q/k/v (then-current)</td><td>4.8e&minus;2</td><td>5.0e&minus;2</td><td>4.91</td></tr>
+                    <tr><td>all float32</td><td>1.8e&minus;3</td><td>1.3e&minus;3</td><td>6.45</td></tr>
+                    <tr class="highlight-row"><td>bf16 q/k/v, fp32 g/beta</td><td>2.4e&minus;3</td><td>1.3e&minus;3</td><td>5.20</td></tr>
+                </tbody>
+            </table>
+
+            <p>Two numbers from that issue are the ones worth carrying around. First: in his test distribution, <strong>27% of bf16 decay values landed on exactly 1.0</strong>. Second: a token 1,000 steps back should retain about 61% of its weight at g = 0.9995; after rounding it retains 100%.</p>
+
+            <p>He also isolated it properly: a float64 reference with <em>only</em> <code>g</code> rounded to bf16 reproduces the full bf16 error. That is how you prove which cast is the culprit instead of guessing.</p>
+
+            <p>The cost of the fix is 0.29 ms on 4.91, about 6%, for a 20&times; error reduction. In the issue thread zcbenz asked what the CUDA gated-delta implementations do; the answer in the thread was that they all pass the decay in float32. MLX was the outlier.</p>
+
+            <h2>Caveats</h2>
+
+            <p>The merged commit has no test. One of the branch commits is titled &ldquo;no need of complicated test for trivial change&rdquo;, and the final diff touches four kernel headers and <code>fast.cpp</code>, and nothing under <code>python/tests/</code>. The issue reports a test that fails on <code>v0.32.4</code> with state error 2.3e&minus;2. A two-line dtype change is exactly the kind of thing a future refactor silently reverts, and the regression costs you nothing to keep. Nobody caught this in review either.</p>
+
+            <p>Second: the issue was labeled <em>low priority</em>. For a sampled chat response, 5e&minus;2 state error will mostly look like a different seed. The place it bites is long-context recall, which is the main reason hybrid linear attention exists, and it bites in a way that no loss curve or perplexity sweep on short sequences will surface. If you benchmarked a Qwen3.5-class gated delta net on MLX in the last six weeks (the kernels landed <a href="https://github.com/ml-explore/mlx/pull/4020" target="_blank" rel="noopener">September 15</a>) and concluded its long-range recall was mediocre, you were measuring 8 mantissa bits.</p>
+
+            <p>Not in <code>v0.32.4</code>. You need main.</p>
+
+            <p>My takeaway: a framework shouldn't cast a parameter to the activation dtype just because it's passed in next to the activations. A decay value that lives in a narrow band just below 1.0 has nothing to do with how Q and K are stored.</p>
+
+            <p class="back-link" style="margin-top: 40px;">&larr; <a href="../index.html">Back to index</a></p>
+        </article>
+    </main>
+
+    <footer>
+        <p>&copy; 2026 kmadiar.dev</p>
+    </footer>
+</div>
+
+</body>
+</html>

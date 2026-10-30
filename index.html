@@ -30,6 +30,83 @@
 
                 <!-- POSTS:START — newest first. Add each new post card directly below this line. -->
                 <div class="post-card">
+                    <div class="post-date">October 30, 2026</div>
+                    <h3 class="post-title"><a href="posts/2026-10-30-codex-oss-16gb-mac-context-budget.html">Local Codex on a 16 GB M5: gpt-oss-20b decoded at 0.3 tokens per second</a></h3>
+                    <p>I tried codex --oss with gpt-oss-20b on my 16 GB M5. The weights are 12.82 GiB, Metal gives the GPU 11.84 GiB, and Ollama defaults to a 4k context. Measurements, the math, and the config I ended up with.</p>
+                    <div class="tags">
+                        <span class="tag">#codex</span>
+                        <span class="tag">#openai</span>
+                        <span class="tag">#gpt-oss</span>
+                        <span class="tag">#apple-silicon</span>
+                    </div>
+                </div>
+                <div class="post-card">
+                    <div class="post-date">October 26, 2026</div>
+                    <h3 class="post-title"><a href="posts/2026-10-26-mlx-gated-delta-bf16-decay-rounds-to-one.html">In bf16, a decay of 0.9995 is 1.0</a></h3>
+                    <p>MLX cast the gated delta net decay to the activation dtype. In bf16 that rounds 27% of gate values to exactly 1.0, and a state that never decays is not a bug the loss curve will tell you about.</p>
+                    <div class="tags">
+                        <span class="tag">#mlx</span>
+                        <span class="tag">#metal</span>
+                        <span class="tag">#numerics</span>
+                        <span class="tag">#linear-attention</span>
+                    </div>
+                </div>
+                <div class="post-card">
+                    <div class="post-date">October 15, 2026</div>
+                    <h3 class="post-title"><a href="posts/2026-10-15-metal-bf16-tensor-fa-half-accumulator.html">llama.cpp's BF16 attention kernel: the prefill number is the headline, the accumulator is the story</a></h3>
+                    <p>PR #30491 adds BF16 instantiations of llama.cpp's Metal tensor-API flash attention. The +44% prefill is prefill-only. The real finding is that the simdgroup BF16 kernel accumulates attention output in half, with the fp32 variant commented out.</p>
+                    <div class="tags">
+                        <span class="tag">#llama-cpp</span>
+                        <span class="tag">#metal</span>
+                        <span class="tag">#tensor-api</span>
+                        <span class="tag">#numerics</span>
+                    </div>
+                </div>
+                <div class="post-card">
+                    <div class="post-date">October 12, 2026</div>
+                    <h3 class="post-title"><a href="posts/2026-10-12-llama-moe-expert-cache-is-host-metal.html">llama.cpp's MoE expert cache: read the eligibility predicate before the benchmark table</a></h3>
+                    <p>llama.cpp PR #29887 adds --moe-cache-mib, an LRU of MoE experts in GPU memory with 1.57-2.20x decode speedups over PCIe. All three Metal buffer types report is_host = false, so on Apple Silicon the cache disables itself.</p>
+                    <div class="tags">
+                        <span class="tag">#llama-cpp</span>
+                        <span class="tag">#moe</span>
+                        <span class="tag">#unified-memory</span>
+                        <span class="tag">#apple-silicon</span>
+                    </div>
+                </div>
+                <div class="post-card">
+                    <div class="post-date">October 5, 2026</div>
+                    <h3 class="post-title"><a href="posts/2026-10-05-metal-few-row-mma-spec-decode.html">Speculative decoding on Apple GPUs was slower than not using it. The fix landed this morning.</a></h3>
+                    <p>Metal had no mat-mul kernel for a handful of rows, so llama.cpp verified speculative drafts with the mat-vec kernel. On an M3 Ultra that made DFlash2 decoding slower than serial decoding: 16.8 t/s against 32. PR #29869 takes it to 64.4.</p>
+                    <div class="tags">
+                        <span class="tag">#llama-cpp</span>
+                        <span class="tag">#metal</span>
+                        <span class="tag">#speculative-decoding</span>
+                        <span class="tag">#kernels</span>
+                    </div>
+                </div>
+                <div class="post-card">
+                    <div class="post-date">September 26, 2026</div>
+                    <h3 class="post-title"><a href="posts/2026-09-26-executorch-mlx-temp-slots-jetsam.html">1918 live tensors at the end of prefill: ExecuTorch's MLX backend never released a temp slot</a></h3>
+                    <p>gemma4-e2b on an iPhone 16 finished prefill holding 3.1 GB of intermediates and was killed by jetsam. The cause is the AOT memory plan, not a refcount bug, and set_cache_limit(0) moves peak memory by exactly zero.</p>
+                    <div class="tags">
+                        <span class="tag">#executorch</span>
+                        <span class="tag">#mlx</span>
+                        <span class="tag">#ios</span>
+                        <span class="tag">#memory</span>
+                    </div>
+                </div>
+                <div class="post-card">
+                    <div class="post-date">September 21, 2026</div>
+                    <h3 class="post-title"><a href="posts/2026-09-21-mlx-nvfp4-matrix-kernels-prefill-only.html">MLX's nvfp4 prefill went 1,267 &rarr; 4,256 tok/s in two PRs. Decode went 81.9 &rarr; 81.7.</a></h3>
+                    <p>Two MLX PRs merged September 14 took nvfp4 prefill on Qwen3.6-35B-A3B from 1,267 to 4,256 tok/s on M5 Max. Decode went 81.9 to 81.7. That split is the whole lesson.</p>
+                    <div class="tags">
+                        <span class="tag">#mlx</span>
+                        <span class="tag">#nvfp4</span>
+                        <span class="tag">#quantization</span>
+                        <span class="tag">#m5</span>
+                    </div>
+                </div>
+                <div class="post-card">
                     <div class="post-date">September 15, 2026</div>
                     <h3 class="post-title"><a href="posts/2026-09-15-minicpm5-2b-kv-cache-config-json.html">MiniCPM5-2B's 131k context is 5.25 GiB of KV cache on a phone. The config.json tells you more than the leaderboard.</a></h3>
                     <p>Two KV heads, 42 layers, head_dim 128 &mdash; 43 KB per token. The honest window on a phone is 8k&ndash;16k, and the 130k vocab is a fixed surcharge on every token you decode.</p>

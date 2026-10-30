@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>llama.cpp's MoE expert cache: read the eligibility predicate before the benchmark table | kmadiar.dev</title>
+    <meta name="description" content="llama.cpp PR #29887 adds --moe-cache-mib, an LRU of MoE experts in GPU memory with 1.57-2.20x decode speedups over PCIe. All three Metal buffer types report is_host = false, so on Apple Silicon the cache disables itself.">
+    <link rel="stylesheet" href="../style.css">
+    <!-- Analytics: GoatCounter. Cookie-free, no PII, no consent banner needed.
+         REPLACE "YOURCODE" with your GoatCounter subdomain before pushing. -->
+    <script data-goatcounter="https://YOURCODE.goatcounter.com/count"
+            async src="//gc.zgo.at/count.js"></script>
+</head>
+<body>
+
+<div class="container">
+    <header>
+        <a href="../index.html" class="logo">kmadiar_@_dev:~#</a>
+        <div class="meta-links" style="margin-top: 10px;">
+            <a href="../index.html">&larr; Back to Home</a>
+            <a href="https://github.com/kmadiar" target="_blank" rel="noopener">GitHub</a>
+            <a href="../contact.html">Contact</a>
+        </div>
+    </header>
+
+    <main>
+        <article>
+            <div class="post-header">
+                <div class="post-date">October 12, 2026</div>
+                <h1>llama.cpp's MoE expert cache: read the eligibility predicate before the benchmark table</h1>
+                <div class="tags">
+                    <span class="tag">#llama-cpp</span>
+                    <span class="tag">#moe</span>
+                    <span class="tag">#unified-memory</span>
+                    <span class="tag">#apple-silicon</span>
+                </div>
+            </div>
+
+            <p>New flag, merged October 7: <code>--moe-cache-mib N</code> (or <code>LLAMA_ARG_MOE_CACHE_MIB</code>). It keeps an LRU of MoE experts in a GPU buffer and uploads only the misses, for models whose experts don't fit in VRAM. <a href="https://github.com/ggml-org/llama.cpp/pull/29887" target="_blank" rel="noopener">PR #29887</a> is a port of the qvac-fabric cache: 14 files, +761/&minus;18, with 550 lines of it in a new <code>src/llama-moe-cache.cpp</code>.</p>
+
+            <p>The table is striking. Qwen3.8-Flash-Next Q4_0, 93.7 GiB total with 65.4 GiB of experts, EPYC 7742 host, PCIe 4.0 x16:</p>
+
+            <table>
+                <thead>
+                    <tr><th>GPU</th><th>config</th><th>tg t/s</th><th>speed-up</th><th>hit rate</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>RTX 4090</td><td><code>--fit</code> (master)</td><td>25.0</td><td>1.00&times;</td><td>-</td></tr>
+                    <tr><td>RTX 4090</td><td><code>--fit --moe-cache-mib 6544</code></td><td>39.4</td><td>1.57&times;</td><td>72%</td></tr>
+                    <tr><td>RTX 5090</td><td><code>--fit</code> (master)</td><td>30.8</td><td>1.00&times;</td><td>-</td></tr>
+                    <tr class="highlight-row"><td>RTX 5090</td><td><code>-cmoe --moe-cache-mib 19000</code></td><td>67.8</td><td>2.20&times;</td><td>89%</td></tr>
+                </tbody>
+            </table>
+
+            <p>The author suggests budgeting about 10% of total expert size. Those are real numbers and the mechanism is sound: expert selection is sparse and temporally correlated, so an LRU over a PCIe link is exactly the right trick.</p>
+
+            <p>Now the part that decides whether any of it applies to you.</p>
+
+            <h2>The eligibility predicate</h2>
+
+            <p>A layer is cacheable only if <em>all</em> of its expert tensors satisfy:</p>
+
+<pre><code>static bool llama_moe_cache_is_host_weight(const ggml_tensor * t) {
+    return t-&gt;buffer != nullptr &amp;&amp;
+        ggml_backend_buffer_get_usage(t-&gt;buffer) == GGML_BACKEND_BUFFER_USAGE_WEIGHTS &amp;&amp;
+        ggml_backend_buffer_is_host(t-&gt;buffer);
+}</code></pre>
+
+            <p><code>ggml_backend_buffer_is_host</code>. On the Metal backend, from <code>ggml/src/ggml-metal/ggml-metal.cpp</code>, all three buffer types (shared, private, and mapped) implement it as:</p>
+
+<pre><code>static bool ggml_backend_metal_buffer_type_shared_is_host(ggml_backend_buffer_type_t buft) {
+    return false;
+
+    GGML_UNUSED(buft);
+}</code></pre>
+
+            <p>So nothing llama.cpp has loaded into a Metal buffer is ever a candidate, no matter how much unified memory you have or how little of it is free. If you pass <code>--moe-cache-mib</code> on a Mac with a normal load, you get this and nothing else:</p>
+
+<pre><code>no layer has all of its experts in host memory, MoE cache is disabled</code></pre>
+
+            <p>That is not a bug. &ldquo;Host&rdquo; in ggml means CPU-backend memory, and a Metal buffer is a device buffer that happens to be CPU-addressable. But it means the flag's reachability on Apple Silicon is: put the experts in CPU buffers on purpose (<code>-cmoe</code>, <code>--n-cpu-moe</code>, or a buft override), then turn the cache on.</p>
+
+            <h2>What the cache actually buys on unified memory</h2>
+
+            <p>Do that, and the transaction changes completely. On a 4090 the cache converts a PCIe round trip into a local read: tens of gigabytes per second of bus traffic, replaced by VRAM bandwidth. On an M-series Mac there is no bus to amortize. The experts in the CPU buffer and the cache slots in the Metal buffer are in the same physical DRAM, at the same bandwidth. What you actually get is:</p>
+
+            <ul>
+                <li>expert matmuls for cached experts move from the CPU backend to the GPU,</li>
+                <li>at the cost of a RAM-to-RAM copy on each miss,</li>
+                <li>and a second resident copy of every cached expert, out of the same memory you were short of.</li>
+            </ul>
+
+            <p>Whether that nets out positive is a question about your CPU-versus-GPU quantized matmul throughput on that machine, not about PCIe. It might be a solid win on an M4 Max with bandwidth headroom; it might be a wash on a base M4 where the copy and the extra residency cost more than the CPU path did. Nobody has published a Metal number, and the PR doesn't claim one.</p>
+
+            <h2>Other limits</h2>
+
+            <p><strong>Batch size.</strong> <code>static constexpr int64_t max_batch = 32;</code> means ubatches over 32 tokens skip the cache entirely and take the regular offload path. The feature is a decode optimization by construction. The multi-GPU follow-up <a href="https://github.com/ggml-org/llama.cpp/pull/30112" target="_blank" rel="noopener">#30112</a> makes that explicit on 2&times;4090:</p>
+
+            <table>
+                <thead>
+                    <tr><th>config</th><th>decode t/s</th><th>vs master</th><th>prompt t/s</th><th>vs master</th><th>hit rate</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td><code>--fit</code> (master)</td><td>34.78</td><td>1.00&times;</td><td>440.7</td><td>1.00&times;</td><td>-</td></tr>
+                    <tr><td><code>--fit --moe-cache-mib 6544</code></td><td>60.38</td><td>1.74&times;</td><td>402.0</td><td>0.91&times;</td><td>85.9%</td></tr>
+                    <tr><td><code>-cmoe --moe-cache-mib 15000</code></td><td>64.39</td><td>1.85&times;</td><td>321.5</td><td>0.73&times;</td><td>95.8%</td></tr>
+                </tbody>
+            </table>
+
+            <p>Buying 74&ndash;85% on decode and giving back 9&ndash;27% on prefill is a fine trade for chat and a bad one for bulk summarization. The PR headline is the decode column.</p>
+
+            <p><strong>Topology.</strong> #29887 throws outright on more than one device or on pipeline parallelism; #30112 added multi-GPU a day later with a per-GPU budget. Tensor parallelism still throws.</p>
+
+            <h2>Measuring it yourself</h2>
+
+            <p>The implementation logs what you need, so use that rather than guessing. At load you get the cache size and the slot count as a percentage of total experts per group; at the end of the run:</p>
+
+<pre><code>llama_moe_cache: &lt;name&gt;: hits = N, misses = M, hit rate = X%, uploaded = Y MiB</code></pre>
+
+            <div class="callout">
+                <p><strong>Hit rate without a t/s comparison tells you nothing.</strong> A 90% hit rate on a machine where the miss was cheap is 90% of no benefit. Run your own prompt mix at your own <code>-ub</code>, with and without the flag, and look at decode <em>and</em> prefill. On a Mac, also watch resident memory, since the cache adds to it.</p>
+            </div>
+
+            <p class="back-link" style="margin-top: 40px;">&larr; <a href="../index.html">Back to index</a></p>
+        </article>
+    </main>
+
+    <footer>
+        <p>&copy; 2026 kmadiar.dev</p>
+    </footer>
+</div>
+
+</body>
+</html>

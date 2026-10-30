@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Local Codex on a 16 GB M5: gpt-oss-20b decoded at 0.3 tokens per second | kmadiar.dev</title>
+    <meta name="description" content="I ran codex --oss with gpt-oss-20b through Ollama on a 16 GB M5. The weights are 12.82 GiB, Metal gives the GPU 11.84 GiB, and Ollama defaults to a 4k context. Measurements, the math behind them, and the config I use.">
+    <link rel="stylesheet" href="../style.css">
+    <!-- Analytics: GoatCounter. Cookie-free, no PII, no consent banner needed.
+         REPLACE "YOURCODE" with your GoatCounter subdomain before pushing. -->
+    <script data-goatcounter="https://YOURCODE.goatcounter.com/count"
+            async src="//gc.zgo.at/count.js"></script>
+</head>
+<body>
+
+<div class="container">
+    <header>
+        <a href="../index.html" class="logo">kmadiar_@_dev:~#</a>
+        <div class="meta-links" style="margin-top: 10px;">
+            <a href="../index.html">&larr; Back to Home</a>
+            <a href="https://github.com/kmadiar" target="_blank" rel="noopener">GitHub</a>
+            <a href="../contact.html">Contact</a>
+        </div>
+    </header>
+
+    <main>
+        <article>
+            <div class="post-header">
+                <div class="post-date">October 30, 2026</div>
+                <h1>Local Codex on a 16 GB M5: gpt-oss-20b decoded at 0.3 tokens per second</h1>
+                <div class="tags">
+                    <span class="tag">#codex</span>
+                    <span class="tag">#openai</span>
+                    <span class="tag">#gpt-oss</span>
+                    <span class="tag">#apple-silicon</span>
+                    <span class="tag">#on-device</span>
+                </div>
+            </div>
+
+            <p>Codex has a local mode: <code>codex --oss</code> sends requests to a model running on your own machine instead of to OpenAI. The <a href="https://developers.openai.com/codex/developer-commands?surface=cli" target="_blank" rel="noopener">CLI reference</a> supports two backends for it, Ollama and LM Studio, picked with <code>--local-provider</code> or with <code>oss_provider</code> in <code>~/.codex/config.toml</code>. I set it up on my 16 GB M5 MacBook with <a href="https://huggingface.co/openai/gpt-oss-20b" target="_blank" rel="noopener">gpt-oss-20b</a>, since OpenAI and Ollama both say it runs in 16 GB of memory. It does run. Decode came out at 0.2 to 0.4 tokens per second, with 2% of RAM free and about 13 GB in swap.</p>
+
+            <p>You can predict that result from two values you can look up before downloading anything. This post goes through both, then the config I ended up with.</p>
+
+            <h2>What I measured</h2>
+
+            <p>Ollama 0.40.13 from Homebrew on macOS 26.6.2, server started with <code>OLLAMA_CONTEXT_LENGTH=32768</code>, GPU wired limit left at the default. Four generations across two server sessions, two cold and two warm, 64 output tokens each.</p>
+
+            <table>
+                <thead>
+                    <tr><th>measurement</th><th>result</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td><code>ollama ps</code> PROCESSOR</td><td>23%/77% CPU/GPU</td></tr>
+                    <tr><td>cold load</td><td>32&ndash;41 s</td></tr>
+                    <tr><td>prefill, 76&ndash;78 token prompt</td><td>2.5&ndash;3.1 tok/s</td></tr>
+                    <tr class="highlight-row"><td>decode</td><td>0.2&ndash;0.4 tok/s</td></tr>
+                    <tr><td>memory while loaded</td><td>2&ndash;4% free, 11.9&ndash;13.1 GiB of swap in use</td></tr>
+                </tbody>
+            </table>
+
+            <p>Roughly a quarter of the model ended up on the CPU side, and there wasn't enough physical memory left to hold it either, so the machine was paging for the whole run. Warm runs weren't reliably faster than cold ones. At these speeds Codex would spend many minutes just reading its own instructions and tool definitions before it touched any code.</p>
+
+            <h2>Why it doesn't fit: Metal's working set</h2>
+
+            <p>On Apple Silicon the GPU doesn't get all of unified memory. Metal reports a per-device limit, <code>recommendedMaxWorkingSetSize</code>, and <a href="https://github.com/ggml-org/llama.cpp/blob/master/ggml/src/ggml-metal/ggml-metal-device.m" target="_blank" rel="noopener">ggml</a> (the library under llama.cpp and Ollama's runner) uses it as the GPU's total memory. You can read yours with a few lines of Swift. Save this as <code>ws.swift</code> and run <code>swift ws.swift</code>:</p>
+
+<pre><code>import Metal
+let d = MTLCreateSystemDefaultDevice()!
+print(d.recommendedMaxWorkingSetSize)
+// 12713115648  -&gt;  11.84 GiB</code></pre>
+
+            <p>On my machine it's 11.84 GiB, and Ollama's startup log agrees: <code>total="11.8 GiB"</code>.</p>
+
+            <p>The gpt-oss-20b weights are 12.82 GiB (<code>original/model.safetensors</code> in OpenAI's repo is 13,761,300,984 bytes; Ollama lists the model at 14 GB). Only the MoE experts are MXFP4. Attention, embeddings, the router and the LM head are kept at higher precision, so there's no easy extra quantization step left. That puts the weights about 1 GiB over budget before any KV cache. ggml's source has a comment noting you can allocate past the recommended size, and you can, but on a 16 GB machine the rest of the system pays for it.</p>
+
+            <h2>The default context is 4,096 tokens</h2>
+
+            <p>The other interesting line in Ollama's startup log was <code>default_num_ctx=4096</code>. Per Ollama's <a href="https://docs.ollama.com/context-length" target="_blank" rel="noopener">context-length docs</a>, the default depends on VRAM: 4k under 24 GiB, 32k from 24 to 48 GiB, 256k above that. Since the GPU only gets a fraction of RAM, a 24 GB Mac lands in the 4k tier as well. The same page recommends at least 64000 tokens for agents and coding tools. That makes sense once you count what an agent keeps in context: system prompt, tool schemas, <code>AGENTS.md</code>, plus every file it opens and every command output it reads back. One medium-sized source file can use up 4k by itself.</p>
+
+            <p>This can't be fixed from the Codex side. Codex talks to providers over the Responses API (<code>wire_api = "responses"</code> is the only value the config reference allows), and Ollama's <a href="https://docs.ollama.com/api/openai-compatibility" target="_blank" rel="noopener">OpenAI-compatibility page</a> says the OpenAI API has no way to set context size. It has to be configured on the Ollama server.</p>
+
+            <h2>How much the context costs</h2>
+
+            <p>This part is good news. gpt-oss-20b alternates sliding-window layers (128-token window) with full-attention layers, 12 of each, with 8 KV heads of dimension 64. At f16 that works out to 2 KiB per token per layer. Only the full-attention layers grow with context, so it's 24 KiB per token overall. The sliding layers stay at 18 MiB regardless (Ollama's runner gives them 768 cells). For comparison, <a href="2026-09-15-minicpm5-2b-kv-cache-config-json.html">MiniCPM5-2B</a> costs 43 KB per token.</p>
+
+            <table>
+                <thead>
+                    <tr><th>context</th><th>full-attention KV (12 layers, f16)</th><th>weights + KV</th><th>over the 11.84 GiB budget</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>4,096 (Ollama default, &lt;24 GiB)</td><td>0.09 GiB</td><td>12.91 GiB</td><td>+1.07 GiB</td></tr>
+                    <tr><td>32,768</td><td>0.75 GiB</td><td>13.57 GiB</td><td>+1.73 GiB</td></tr>
+                    <tr class="highlight-row"><td>64,000 (Ollama's floor for coding tools)</td><td>1.46 GiB</td><td>14.28 GiB</td><td>+2.44 GiB</td></tr>
+                    <tr><td>131,072 (model maximum)</td><td>3.00 GiB</td><td>15.82 GiB</td><td>+3.98 GiB</td></tr>
+                </tbody>
+            </table>
+
+            <p>The runner log for my 32k run showed <code>768.00 MiB</code> of KV for the 12 full-attention layers, matching the table. Going from 4k to 64k costs less than 1.5 GiB, so raising the context is affordable. Most of the problem is the weights.</p>
+
+            <h2>Config</h2>
+
+            <p>The context window has to be set on the Ollama server, repeated in the Codex config, and small enough to fit your GPU budget. On a 16 GB machine I'd use 32768. With more memory, go to 64000 or higher.</p>
+
+<pre><code>OLLAMA_CONTEXT_LENGTH=32768 ollama serve
+ollama ps    # CONTEXT is what actually got applied; PROCESSOR shows any CPU split</code></pre>
+
+            <p>Codex can't ask Ollama what the window is, so give it the same number. That way it compacts its history before Ollama starts truncating the prompt. The provider goes in the main config:</p>
+
+<pre><code># ~/.codex/config.toml
+oss_provider = "ollama"</code></pre>
+
+            <p>and the rest in a profile. Codex loads <code>$CODEX_HOME/&lt;name&gt;.config.toml</code> on top of the base config when you pass <code>-p &lt;name&gt;</code>:</p>
+
+<pre><code># ~/.codex/local.config.toml
+model = "gpt-oss:20b"
+model_context_window = 32768
+model_auto_compact_token_limit = 28000   # leave room for the reply
+sandbox_mode = "workspace-write"
+approval_policy = "on-request"</code></pre>
+
+<pre><code>codex --oss -p local
+codex exec --oss -p local "explain why test_kv_restore fails"</code></pre>
+
+            <p>Two things in the docs that are easy to miss. <code>codex exec --oss</code> doesn't prompt you to pick a provider like the interactive CLI does. It exits with an error if none is configured. And Codex ignores <code>model_provider</code> and <code>model_providers</code> in a project-level <code>.codex/config.toml</code>, so provider settings belong in your user config.</p>
+
+            <h2>Options on 16 GB</h2>
+
+            <ul>
+                <li><strong>Raise the GPU wired limit.</strong> <code>sudo sysctl iogpu.wired_limit_mb=14336</code> gives the GPU 14 GiB. At 32k context the model needs about 13.6 GiB, which leaves under half a gigabyte for compute buffers and only 2 GiB for the rest of macOS. 64k (14.3 GiB) won't fit. The setting resets on reboot. Re-run the Swift snippet afterwards to check the limit actually changed. I haven't tried this one yet.</li>
+                <li><strong>Live with the CPU split.</strong> That's what the numbers above are.</li>
+                <li><strong>Use a machine with more memory.</strong> With 24 GB or more, 64k context should fit in the default working set (check with the snippet). You still need <code>OLLAMA_CONTEXT_LENGTH</code>, since those machines also get the 4k default.</li>
+            </ul>
+
+            <h2>Where local Codex makes sense</h2>
+
+            <p>On this laptop the hosted models are the practical choice for anything substantial. Local mode is for cases where the network is the problem: flights, air-gapped repos, or code that isn't allowed to leave the machine. Even then I'd keep it to read-only work like reviews and explanations. Since it's set up as a profile, switching is just <code>-p local</code>.</p>
+
+            <p>If you try this on a different Mac, the Swift snippet and <code>ollama ps</code> will tell you in about a minute whether it fits.</p>
+
+            <p class="back-link" style="margin-top: 40px;">&larr; <a href="../index.html">Back to index</a></p>
+        </article>
+    </main>
+
+    <footer>
+        <p>&copy; 2026 kmadiar.dev</p>
+    </footer>
+</div>
+
+</body>
+</html>

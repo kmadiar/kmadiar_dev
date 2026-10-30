@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>llama.cpp's BF16 attention kernel: the prefill number is the headline, the accumulator is the story | kmadiar.dev</title>
+    <meta name="description" content="PR #30491 adds BF16 instantiations of llama.cpp's Metal tensor-API flash attention. The +44% prefill is prefill-only. The real finding is that the simdgroup BF16 kernel accumulates attention output in half, with the fp32 variant commented out.">
+    <link rel="stylesheet" href="../style.css">
+    <!-- Analytics: GoatCounter. Cookie-free, no PII, no consent banner needed.
+         REPLACE "YOURCODE" with your GoatCounter subdomain before pushing. -->
+    <script data-goatcounter="https://YOURCODE.goatcounter.com/count"
+            async src="//gc.zgo.at/count.js"></script>
+</head>
+<body>
+
+<div class="container">
+    <header>
+        <a href="../index.html" class="logo">kmadiar_@_dev:~#</a>
+        <div class="meta-links" style="margin-top: 10px;">
+            <a href="../index.html">&larr; Back to Home</a>
+            <a href="https://github.com/kmadiar" target="_blank" rel="noopener">GitHub</a>
+            <a href="../contact.html">Contact</a>
+        </div>
+    </header>
+
+    <main>
+        <article>
+            <div class="post-header">
+                <div class="post-date">October 15, 2026</div>
+                <h1>llama.cpp's BF16 attention kernel: the prefill number is the headline, the accumulator is the story</h1>
+                <div class="tags">
+                    <span class="tag">#llama-cpp</span>
+                    <span class="tag">#metal</span>
+                    <span class="tag">#tensor-api</span>
+                    <span class="tag">#flash-attention</span>
+                    <span class="tag">#numerics</span>
+                </div>
+            </div>
+
+            <p><a href="https://github.com/ggml-org/llama.cpp/pull/30491" target="_blank" rel="noopener">PR #30491</a> was merged this morning and made it into <code>v0.7.0</code> the same afternoon. It adds BF16 instantiations of the Metal 4 tensor-API flash-attention kernel that landed two weeks ago, so <code>-ctk bf16 -ctv bf16</code> gets the same path <code>-ctk f16</code> already had. The diff is small: a new <code>kernels/fa_tensor.metal</code> (298 lines, moved out of <code>fa_f16.metal</code> at ggerganov's request), a type suffix in the pipeline name, and one line in the dispatch gate.</p>
+
+            <pre><code>const char * type = op-&gt;src[1]-&gt;type == GGML_TYPE_BF16 ? &quot;bf16&quot; : &quot;f16&quot;;
+snprintf(base, 256, &quot;kernel_flash_attn_ext_tensor_%s_dk%d_dv%d&quot;, type, dk, dv);
+</code></pre>
+
+            <p>Twelve instantiations now exist: <code>f16</code> and <code>bf16</code> across dk/dv <code>64/64</code>, <code>128/128</code>, <code>192/128</code>, <code>256/256</code>, <code>512/512</code>, <code>576/512</code>. Full coverage, which is worth noting because the comparable MLX kernel work last week shipped three shapes out of twenty-four.</p>
+
+            <h2>The performance numbers are prefill-only, and the gate says why</h2>
+
+            <p>From the PR body, M5 Pro with a 20-core GPU, Qwen3.8-27B Q8_0, <code>-fa 1</code>:</p>
+
+            <table>
+                <thead>
+                    <tr><th>test</th><th>master, BF16 KV</th><th>PR, BF16 KV</th><th>PR, F16 KV</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>pp512 @ d8192</td><td>323.8</td><td>355.3</td><td>354.2</td></tr>
+                    <tr class="highlight-row"><td>pp512 @ d32768</td><td>184.2</td><td>265.6</td><td>268.5</td></tr>
+                    <tr><td>tg32 @ d8192</td><td>9.09</td><td>9.25</td><td>9.32</td></tr>
+                </tbody>
+            </table>
+
+            <p>+44% on prefill at 32K. Decode moves 9.09 &rarr; 9.25, which is noise, and that is structural rather than unlucky. <code>ggml_metal_op_flash_attn_ext_use_tensor()</code> bails on five separate conditions, and two of them exclude decode outright: it returns false if the vec path applies, and it returns false if</p>
+
+            <pre><code>((ne01 + nqptg - 1)/nqptg)*ne02*ne03*dk &lt; 8192
+</code></pre>
+
+            <p>with <code>nqptg</code> 32 (16 for dk &ge; 512). One query row times a few dozen heads does not clear 8192. There is also a hard requirement that KV length is a multiple of 64 (<code>OP_FLASH_ATTN_EXT_TENSOR_NCPSG</code>), and the device gate still matches on <code>MTLDevice.name</code> containing <code>M5</code>, <code>M6</code>, <code>A19</code> or <code>A20</code> unless you set <code>GGML_METAL_TENSOR_ENABLE=1</code>.</p>
+
+            <p>So: this is a prefill kernel for M5-and-later, and your decode throughput is unchanged. Fine. That is not the interesting part.</p>
+
+            <h2>The accuracy table</h2>
+
+            <p>Same PR body, KLD against <code>-fa off -ctk f32 -ctv f32</code>:</p>
+
+            <table>
+                <thead>
+                    <tr><th>configuration</th><th>mean @ 8K</th><th>mean @ 32K</th><th>same top p @ 32K</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>F16 KV</td><td>1e-6</td><td>1e-6</td><td>99.957%</td></tr>
+                    <tr class="highlight-row"><td>BF16 KV, master</td><td>1.7e-5</td><td>4.05e-4</td><td>99.2%</td></tr>
+                    <tr><td>BF16 KV, this PR</td><td>3e-6</td><td>5e-6</td><td>99.921%</td></tr>
+                    <tr><td>BF16 KV, PR with <code>bfloat</code> P&middot;V destination</td><td>2.1e-5</td><td>6.18e-4</td><td>99.036%</td></tr>
+                </tbody>
+            </table>
+
+            <p>Read rows two and four together. BF16 KV on master diverges 400&times; more than F16 at 32K, and the author's own ablation (keeping the probability-times-V destination in <code>bfloat</code> instead of <code>float</code>) reproduces that divergence inside the new kernel. The new kernel is accurate because it accumulates in fp32:</p>
+
+            <pre><code>auto co = mm_pv.template get_destination_cooperative_tensor&lt;decltype(tp), decltype(tv0), float&gt;();
+</code></pre>
+
+            <p>Now open <code>fa_f16.metal</code> and look at the type macros for the simdgroup path. The last triple in each is the <code>o_t, o4_t, o8x8_t</code> group, documented in the template as &ldquo;attention accumulation types&rdquo;:</p>
+
+            <pre><code>#define FA_TYPES \
+    ...
+    float,  float4,    simdgroup_float8x8
+
+#define FA_TYPES_BF \
+    ...
+    half,   half4,     simdgroup_half8x8
+    //float,  float4,    simdgroup_float8x8
+</code></pre>
+
+            <p>The F16 kernel accumulates attention output in fp32. The BF16 kernel accumulates it in <code>half</code>, with the fp32 variant sitting right there, commented out. That is the 4.05e-4.</p>
+
+            <p>For anyone writing kernels: storing K/V in 16 bits is a bandwidth choice, but accumulating in 16 bits affects correctness, and here both were decided by the same macro.</p>
+
+            <h2>What this means if you ship</h2>
+
+            <p>The tensor path papers over it on M5/M6/A19/A20, for prefill, at the six supported head-size pairs, when KV is a multiple of 64 and the workload clears the 8192 heuristic. Outside that set (an A18, an M3, a short prompt, dk=96), BF16 K/V still runs the simdgroup kernel with a 10-bit mantissa accumulating a sum over the whole KV length.</p>
+
+            <p>Three concrete things:</p>
+
+            <ol>
+                <li>If you were using <code>-ctk bf16 -ctv bf16</code> on pre-M5 hardware to save conversion work, switch to <code>f16</code>. Same 2 bytes per element, fp32 accumulation, 1e-6 KLD.</li>
+                <li>If you are on M5 or later, check for <code>has tensor = true</code> in the init log before attributing a quality change to this PR. The backend compiles a dummy <code>matmul2d</code> kernel at init and silently disables the path if the pipeline fails, once for <code>half</code> and again for <code>bfloat</code>.</li>
+                <li>If you maintain your own Metal attention kernel, this is the bug to grep for.</li>
+            </ol>
+
+            <p>Uncommenting the fp32 variant is a two-character change, if anyone wants to send the PR.</p>
+
+            <p class="back-link" style="margin-top: 40px;">&larr; <a href="../index.html">Back to index</a></p>
+        </article>
+    </main>
+
+    <footer>
+        <p>&copy; 2026 kmadiar.dev</p>
+    </footer>
+</div>
+
+</body>
+</html>
