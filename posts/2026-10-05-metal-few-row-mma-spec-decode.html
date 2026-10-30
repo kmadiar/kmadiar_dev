@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Speculative decoding on Apple GPUs was slower than not using it. The fix landed this morning. | kmadiar.dev</title>
+    <meta name="description" content="Metal had no mat-mul kernel for a handful of rows, so llama.cpp verified speculative drafts with the mat-vec kernel. On an M3 Ultra that made DFlash2 decoding slower than serial decoding: 16.8 t/s against 32. PR #29869 takes it to 64.4.">
+    <link rel="stylesheet" href="../style.css">
+    <!-- Analytics: GoatCounter. Cookie-free, no PII, no consent banner needed.
+         REPLACE "YOURCODE" with your GoatCounter subdomain before pushing. -->
+    <script data-goatcounter="https://YOURCODE.goatcounter.com/count"
+            async src="//gc.zgo.at/count.js"></script>
+</head>
+<body>
+
+<div class="container">
+    <header>
+        <a href="../index.html" class="logo">kmadiar_@_dev:~#</a>
+        <div class="meta-links" style="margin-top: 10px;">
+            <a href="../index.html">&larr; Back to Home</a>
+            <a href="https://github.com/kmadiar" target="_blank" rel="noopener">GitHub</a>
+            <a href="../contact.html">Contact</a>
+        </div>
+    </header>
+
+    <main>
+        <article>
+            <div class="post-header">
+                <div class="post-date">October 5, 2026</div>
+                <h1>Speculative decoding on Apple GPUs was slower than not using it. The fix landed this morning.</h1>
+                <div class="tags">
+                    <span class="tag">#llama-cpp</span>
+                    <span class="tag">#metal</span>
+                    <span class="tag">#speculative-decoding</span>
+                    <span class="tag">#kernels</span>
+                </div>
+            </div>
+
+            <p><a href="https://github.com/ggml-org/llama.cpp/pull/29869" target="_blank" rel="noopener">PR #29869</a> was merged into llama.cpp this morning. The commit message sums up the problem in one sentence:</p>
+
+            <blockquote><p>Speculative decoding verifies a few draft tokens per step. Without the tensor API, Metal ran these mat-muls with the mat-vec kernels, whose time grows with every src1 row, so DFlash2 decoding on an M3 Ultra was slower than serial decoding.</p></blockquote>
+
+            <p>Here is what that cost. M3 Ultra, 60-core GPU, macOS 15.7.9, Qwen3.8-27B Q4_0 as target with a Qwen3.8-27B DFlash2 Q8_0 drafter, <code>-ngl 99 -fa on -c 8192 -np 1 --jinja</code>:</p>
+
+            <table>
+                <thead>
+                    <tr><th>mode</th><th>prompt</th><th>master</th><th>this PR</th></tr>
+                </thead>
+                <tbody>
+                    <tr class="highlight-row"><td>DFlash2</td><td>code</td><td>30.3 t/s</td><td><strong>113.4 t/s</strong></td></tr>
+                    <tr class="highlight-row"><td>DFlash2</td><td>prose</td><td>16.8 t/s</td><td><strong>64.4 t/s</strong></td></tr>
+                    <tr><td>serial</td><td>code</td><td>32.1 t/s</td><td>32.0 t/s</td></tr>
+                </tbody>
+            </table>
+
+            <p>Read the third row against the second. Before today, turning on speculative decoding for prose on an M3 Ultra took you from 32 t/s to 16.8 t/s. The draft acceptance rate was fine. The method was fine. The verification mat-mul was being run by a kernel that charges you linearly per row.</p>
+
+            <h2>Why the mat-vec kernel was the wrong kernel</h2>
+
+            <p>A mat-vec kernel is built for one <code>src1</code> row: load a weight block, dequantize it, multiply by the single activation vector, move on. Memory-bound, bandwidth-optimal, exactly right at batch 1.</p>
+
+            <p>Hand it eight rows and it does the dequantize eight times, because nothing in its structure holds a dequantized weight for reuse. So verifying a 5-token draft costs roughly five single-token decodes of compute, plus the draft model's own work, which is how throughput ends up <em>below</em> serial. Speculative decoding only pays if verifying N tokens costs meaningfully less than N sequential steps, and on Metal that precondition was simply false.</p>
+
+            <p>The fix adds mat-mul kernels for 2&ndash;16 <code>src1</code> rows on 8&times;8 simdgroup matrices: each weight is dequantized once for all rows, and the simdgroups of a threadgroup split K. Q4_0, Q8_0 and Q5_K get dedicated kernels; F32, F16, Q4_1, Q5_0, Q5_1, Q4_K and Q6_K go through a generic path over the 16-weight dequantizers.</p>
+
+            <p>From <code>test-backend-ops perf -o MUL_MAT</code>, m=4096, k=14336, reported as PR time divided by master time (<em>lower is better</em>):</p>
+
+            <table>
+                <thead>
+                    <tr><th>type</th><th>n=2</th><th>n=3</th><th>n=4</th><th>n=5</th><th>n=8</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>F32</td><td>1.00</td><td>0.97</td><td>1.00</td><td>0.99</td><td>0.57</td></tr>
+                    <tr><td>F16</td><td>0.99</td><td>0.97</td><td>0.71</td><td>0.59</td><td>0.34</td></tr>
+                    <tr class="highlight-row"><td>Q4_0</td><td><strong>0.58</strong></td><td>0.58</td><td>0.44</td><td>0.36</td><td><strong>0.22</strong></td></tr>
+                    <tr><td>Q4_1</td><td>0.93</td><td>0.65</td><td>0.50</td><td>0.41</td><td>0.25</td></tr>
+                </tbody>
+            </table>
+
+            <p>Note the shape of that table. For Q4_0 the win is already 1.7&times; at two rows and 4.5&times; at eight. For F32 there is nothing until n=8. That difference is the whole reason there is a threshold table rather than a flag:</p>
+
+            <blockquote><p>use them only on MTLGPUFamilyApple7+ without the tensor API, from the row count at which they beat the mat-vec kernels on an M3 Ultra (F32: 6, F16, Q4_K, Q5_0, Q5_1: 3, other types: 2)</p></blockquote>
+
+            <p>Dequantization cost decides the crossover. With Q4_0 you were paying to unpack 4-bit blocks once per row, so amortizing that across two rows already wins. F32 has no unpacking to amortize, so the MMA path only pays once you are far enough from bandwidth-bound for ALU throughput to matter at all.</p>
+
+            <h2>What I'm less sure about</h2>
+
+            <p><strong>The thresholds are one device's measurements.</strong> F32:6, F16:3, others:2, tuned on an M3 Ultra with 60 GPU cores. The crossover row count is a function of the ratio between dequantize cost and memory bandwidth per core, and an A18 in a phone has a very different one. Nobody has published iPhone numbers. If you ship speculative decoding on iOS, the honest position is that your crossover is unmeasured and the committed constants are a guess for your device.</p>
+
+            <p><strong>It only runs when the tensor API is absent.</strong> <code>MTLGPUFamilyApple7+ without the tensor API</code>, which, given that llama.cpp disables the tensor API unless the device name contains M5, M6, A19 or A20, means every Apple GPU older than those. The Metal mat-mul path has now forked into two worlds split by a device-name check: new chips go through <code>matmul2d</code>, everything older goes through these MMA kernels. Two code paths, one of them tuned on one machine.</p>
+
+            <p>Worth noting as a review outcome: the original PR also fused up to 16 adjacent same-layout f32 copies into a single dispatch. ggerganov measured it on an M2 Ultra, found under 1% difference, and asked for it to be removed. It was, along with the memory-range changes. A fusion that does not clear noise is complexity you maintain forever, and the right call is the one that was made.</p>
+
+            <h2>What to do about it</h2>
+
+            <p>If you benchmarked speculative decoding on Apple silicon and shelved it, that measurement is out of date. Re-run it on master after today. And if you are on an M5, you were never in this regime: your numbers were already fine, and nothing in this PR touches you.</p>
+
+            <p>The general point is that small-N batches behave differently from N=1 and need their own kernels. If a kernel's cost grows linearly with N, anything that verifies N tokens at once (speculative decoding, MTP, draft trees) ends up slower, and the method gets blamed for what is really a kernel problem.</p>
+
+            <p class="back-link" style="margin-top: 40px;">&larr; <a href="../index.html">Back to index</a></p>
+        </article>
+    </main>
+
+    <footer>
+        <p>&copy; 2026 kmadiar.dev</p>
+    </footer>
+</div>
+
+</body>
+</html>

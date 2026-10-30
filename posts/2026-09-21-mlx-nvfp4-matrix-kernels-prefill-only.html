@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MLX nvfp4 prefill 3.4x, decode 0% | kmadiar.dev</title>
+    <meta name="description" content="Two MLX PRs merged September 14 took nvfp4 prefill on Qwen3.6-35B-A3B from 1,267 to 4,256 tok/s on M5 Max. Decode went 81.9 to 81.7. That split is the whole lesson.">
+    <link rel="stylesheet" href="../style.css">
+    <!-- Analytics: GoatCounter. Cookie-free, no PII, no consent banner needed.
+         REPLACE "YOURCODE" with your GoatCounter subdomain before pushing. -->
+    <script data-goatcounter="https://YOURCODE.goatcounter.com/count"
+            async src="//gc.zgo.at/count.js"></script>
+</head>
+<body>
+
+    <div class="container">
+        <header>
+            <a href="../index.html" class="logo">kmadiar_@_dev:~#</a>
+            <div class="meta-links" style="margin-top: 10px;">
+                <a href="../index.html">&larr; Back to Home</a>
+                <a href="https://github.com/kmadiar" target="_blank" rel="noopener">GitHub</a>
+                <a href="../contact.html">Contact</a>
+            </div>
+        </header>
+
+        <main>
+            <article>
+                <div class="post-header">
+                    <div class="post-date">September 21, 2026</div>
+                    <h1>MLX's nvfp4 prefill went 1,267 &rarr; 4,256 tok/s in two PRs. Decode went 81.9 &rarr; 81.7.</h1>
+                    <div class="tags">
+                        <span class="tag">#mlx</span>
+                        <span class="tag">#nvfp4</span>
+                        <span class="tag">#quantization</span>
+                        <span class="tag">#apple-silicon</span>
+                        <span class="tag">#m5</span>
+                    </div>
+                </div>
+
+                <p>Two PRs merged into MLX within eleven minutes of each other on September 14: <a href="https://github.com/ml-explore/mlx/pull/4483" target="_blank" rel="noopener">#4483</a> ("Load global scales in <code>qmm_t</code> kernels", +215/&minus;12, 9 files) and <a href="https://github.com/ml-explore/mlx/pull/4481" target="_blank" rel="noopener">#4481</a> ("Use matrix kernels for global-scale <code>gather_qqmm</code>", +234/&minus;1, 4 files). Both benchmark the same configuration: Qwen3.6-35B-A3B quantized with NVIDIA Model Optimizer, <code>nvfp4_mlp_only</code>, prompt 2048 / generate 128.</p>
+
+                <p>The numbers, from #4483's table:</p>
+
+                <table>
+                    <thead><tr><th></th><th>main prompt t/s</th><th>#4483</th><th>#4483 + #4481</th></tr></thead>
+                    <tbody>
+                    <tr><td>M5 Max</td><td>1,267.5</td><td>1,365.9</td><td><strong>4,256.2</strong></td></tr>
+                    <tr><td>M3 Ultra</td><td>1,603.2</td><td>1,683.5</td><td><strong>2,819.9</strong></td></tr>
+                    </tbody>
+                </table>
+
+                <p>And from #4481's own table, which measures #4481 against main and adds the decode column:</p>
+
+                <table>
+                    <thead><tr><th></th><th>main pp</th><th>PR pp</th><th>main tg</th><th>PR tg</th></tr></thead>
+                    <tbody>
+                    <tr><td>M5 Max</td><td>1,257.0</td><td>3,105.3</td><td>81.9</td><td><strong>81.7</strong></td></tr>
+                    <tr><td>M3 Ultra</td><td>1,627.3</td><td>2,673.2</td><td>68.5</td><td><strong>68.6</strong></td></tr>
+                    </tbody>
+                </table>
+
+                <p>Two tables, slightly different baselines (1,267.5 vs 1,257.0 on M5 Max; that's run-to-run noise of roughly 0.8%), which is itself a useful reminder that &plusmn;1% on these benchmarks is not signal.</p>
+
+                <h2>The shape of it</h2>
+
+                <p>The generation column is the point. Prefill got 3.4&times; on M5 Max and decode moved by &minus;0.2%, which is zero.</p>
+
+                <p>This is the clearest compute-bound/bandwidth-bound split you'll see in a real PR pair. Prefill at 2048 tokens is a batch of 2048 through each matmul: arithmetic intensity is high, you're limited by how fast the ALUs consume the weights, and putting the quantized matmul on the matrix units instead of the general SIMD path is worth 3&times;. Decode is a batch of one: every weight is touched exactly once per token, arithmetic intensity is about 1, and you are limited by how fast you can stream the weights out of unified memory. Faster multipliers do not help you read memory faster. So decode doesn't move, and it <em>shouldn't</em>, and a PR that claimed it did would be the suspicious one.</p>
+
+                <p>Put another way, decode only gets faster when you read fewer bytes per token: harder quantization, shared KV, pruned experts, speculation. Kernel work mostly helps prefill, which is your time-to-first-token. Both matter, but they're separate budgets, and mixing them up is how a 3&times; speedup ships and nobody notices.</p>
+
+                <h2>Why the split between two PRs matters</h2>
+
+                <p>#4483 on its own (teaching <code>qmm_t</code> to load the global scale) is 1.08&times; on M5 Max. On its own you'd call that a modest win and move on. It isn't the win; it's the <em>enabling</em> change. #4481 wires the new <code>gather_qmm</code> kernels into <code>gather_qqmm</code> (the MoE path, where each token's experts are gathered before the matmul), and that's where 1.36k becomes 4.26k.</p>
+
+                <p>That ordering is worth noticing because it's the usual shape of quantization work and it keeps catching people out. A new format lands. The first implementation is a correct-but-scalar dequant-and-multiply path. Benchmarks say the format is barely faster than what you had, and half the internet concludes the format is overhyped. Then someone puts it on the matrix units and it's 3&times;. The number you measure is a property of the kernel, not the format.</p>
+
+                <p>Three weeks ago the story on MLX's nvfp4 was a <em>correctness</em> one: the global scale term was missing entirely, so the fp8 block scales had to cover a tensor's absolute magnitude as well as its internal spread, underflowed on small-weight tensors, and produced garbage on Granite. That got fixed. This week the same term got fast. Correctness first, then the tensor units. That's the right order, and it took about two weeks end to end.</p>
+
+                <h2>Does any of this reach a phone?</h2>
+
+                <p>Mostly no, and I'll keep saying it. nvfp4's payoff is on hardware with matrix units that consume it natively, and the MLX kernels here are the NAX-path quantized matmuls. The benchmark machines are an M5 Max and an M3 Ultra. On an iPhone you are shipping affine int4 at group size 64, or a GGUF k-quant, and none of this touches your build.</p>
+
+                <p>What does reach you is the reasoning. If you're deciding whether a new low-precision format is worth adopting, benchmark it when it's on the matrix path and not before. Also benchmark prefill and decode separately, because they will disagree, and one of them is the one your users feel.</p>
+
+                <p class="back-link" style="margin-top: 40px;">&larr; <a href="../index.html">Back to index</a></p>
+            </article>
+        </main>
+
+        <footer>
+            <p>&copy; 2026 kmadiar.dev</p>
+        </footer>
+    </div>
+
+</body>
+</html>

@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>1918 live tensors at the end of prefill: ExecuTorch's MLX backend never released a temp slot | kmadiar.dev</title>
+    <meta name="description" content="gemma4-e2b on an iPhone 16 finished prefill holding 3.1 GB of intermediates and was killed by jetsam. The cause is the AOT memory plan, not a refcount bug, and set_cache_limit(0) moves peak memory by exactly zero.">
+    <link rel="stylesheet" href="../style.css">
+    <!-- Analytics: GoatCounter. Cookie-free, no PII, no consent banner needed.
+         REPLACE "YOURCODE" with your GoatCounter subdomain before pushing. -->
+    <script data-goatcounter="https://YOURCODE.goatcounter.com/count"
+            async src="//gc.zgo.at/count.js"></script>
+</head>
+<body>
+
+<div class="container">
+    <header>
+        <a href="../index.html" class="logo">kmadiar_@_dev:~#</a>
+        <div class="meta-links" style="margin-top: 10px;">
+            <a href="../index.html">&larr; Back to Home</a>
+            <a href="https://github.com/kmadiar" target="_blank" rel="noopener">GitHub</a>
+            <a href="../contact.html">Contact</a>
+        </div>
+    </header>
+
+    <main>
+        <article>
+            <div class="post-header">
+                <div class="post-date">September 26, 2026</div>
+                <h1>1918 live tensors at the end of prefill: ExecuTorch's MLX backend never released a temp slot</h1>
+                <div class="tags">
+                    <span class="tag">#executorch</span>
+                    <span class="tag">#mlx</span>
+                    <span class="tag">#ios</span>
+                    <span class="tag">#memory</span>
+                    <span class="tag">#on-device</span>
+                </div>
+            </div>
+
+            <p><a href="https://github.com/pytorch/executorch/pull/23109" target="_blank" rel="noopener">PR #23109</a> landed overnight. In short, <code>ExecutionState::tensors</code> was never pruned, so a chain ended up holding every intermediate it had ever produced. Whether that actually costs you memory depends on how the model was exported, which surprised me more than the bug itself.</p>
+
+            <p>Here is the measurement, iPhone 16, gemma4-e2b int4, 2392-character prompt:</p>
+
+            <table>
+                <thead>
+                    <tr><th></th><th>live slots</th><th>live MB</th><th>peak <code>phys_footprint</code></th><th>outcome</th></tr>
+                </thead>
+                <tbody>
+                    <tr class="highlight-row"><td>stock</td><td>1918</td><td>3102.9 MB</td><td>3401 MB</td><td>killed by jetsam in prefill</td></tr>
+                    <tr><td>this PR</td><td>3</td><td>1.2 MB</td><td>1379 MB</td><td>completes normally</td></tr>
+                </tbody>
+            </table>
+
+            <p>A 52-character prompt completes on both builds. That sentence is the whole reason this survived into shipped releases: the failure is invisible to any smoke test whose prompt is short, because the retained intermediates are sized by sequence length.</p>
+
+            <h2>Where the memory goes</h2>
+
+            <p>This is not a refcount bug. Every tensor in that table is exactly as live as the runtime believes it to be. The runtime just believes something the graph stopped meaning a long time ago.</p>
+
+            <p>ExecuTorch's AOT memory planner assigns each intermediate a slot. Whisper's plan reuses a handful of slots across the whole program, so nothing accumulates. The gemma4-e2b prefill plan assigns roughly one slot per instruction, and with 3243 instructions you finish holding 1918 of them. Same runtime, same bug, and one model shows nothing while the other dies.</p>
+
+            <p>The short version: an AOT memory plan says when each tensor is dead, and the runtime has to actually free it at that point. Until this PR, nothing did.</p>
+
+            <p>The fix walks each chain, works out the last use of every temp, and releases the slot there. The eligibility test is one comparison:</p>
+
+            <pre><code>// ids run Constant -&gt; Input -&gt; Output -&gt; MutableBuffer -&gt; Temp
+id.idx &gt;= mutable_buffer_end</code></pre>
+
+            <p>Anything at or past <code>mutable_buffer_end</code> is neither a method output nor a caller-visible buffer, so releasing it cannot be observed. Chains containing <code>SCAN</code> or <code>IF</code> opt out entirely, because <code>for_each_tid</code> does not descend into nested chains and a conservative pass that cannot see all the uses must not free anything.</p>
+
+            <h2>What came up in review</h2>
+
+            <p>A reviewer asked whether MLX's own memory controls would be a better lever, and the answer came back as a table. M3 Pro, Qwen3-0.6B int4 exported from the branch, 2047-token prefill, medians of four interleaved rounds of five runs:</p>
+
+            <table>
+                <thead>
+                    <tr><th>arm</th><th>ms</th><th>peak MB</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>none</td><td>632</td><td>829</td></tr>
+                    <tr><td>eval threshold 512 MB</td><td>640</td><td>233</td></tr>
+                    <tr><td>eval threshold 128 MB</td><td>654</td><td>97</td></tr>
+                    <tr><td><code>set_memory_limit</code> +512 MB</td><td>635</td><td>519</td></tr>
+                    <tr><td><code>set_memory_limit</code> +256 MB</td><td>635</td><td>263</td></tr>
+                    <tr><td><code>set_memory_limit</code> +128 MB</td><td>634</td><td>135</td></tr>
+                    <tr class="highlight-row"><td><code>set_cache_limit(0)</code></td><td>638</td><td>829</td></tr>
+                </tbody>
+            </table>
+
+            <p>Outputs identical across every arm. Single-token decode is 6.3 ms everywhere except <code>set_cache_limit(0)</code>, which costs 7.1.</p>
+
+            <p>Read the last row first. <code>set_cache_limit(0)</code> is the knob everyone reaches for when an MLX process is too fat, and it moved peak by zero, because MLX's cache holds memory that is already free, and this problem is memory that is still allocated. It made decode 13% slower for nothing.</p>
+
+            <p><code>mx.set_memory_limit</code> bounds peak about as well as the eval threshold does and costs nothing measurable in latency: 829 MB down to 135 MB for 2 ms on a 2047-token prefill. Its two drawbacks are that it is process-global and takes an absolute byte count, which is awkward the moment you have two models loaded in one app.</p>
+
+            <h2>What I'd do</h2>
+
+            <p>The nuance the thread surfaces and the PR body doesn't: recent MLX exports already reuse temp slots aggressively, so a graph exported this month may not produce the 1918-slot plan at all. The author's target was ET 1.4.1. So this is primarily a fix for <code>.pte</code> files you exported and shipped months ago. If you ship on-device models, that's probably most of yours.</p>
+
+            <p>Three things worth doing this week:</p>
+
+            <ol>
+                <li>Log live slot count and <code>phys_footprint</code> at the end of prefill on your longest realistic prompt, on the oldest device you support. Not your test prompt.</li>
+                <li>Re-export against current MLX and diff the slot count. If it drops, your fix is free.</li>
+                <li>If it doesn't, set <code>mx.set_memory_limit</code> rather than reaching for <code>set_cache_limit(0)</code>.</li>
+            </ol>
+
+            <p>Keep in mind jetsam kills don't come with a stack trace. What you'll see is the crash-free session rate slipping on 6 GB devices and support tickets saying the app closes on long documents.</p>
+
+            <p class="back-link" style="margin-top: 40px;">&larr; <a href="../index.html">Back to index</a></p>
+        </article>
+    </main>
+
+    <footer>
+        <p>&copy; 2026 kmadiar.dev</p>
+    </footer>
+</div>
+
+</body>
+</html>
